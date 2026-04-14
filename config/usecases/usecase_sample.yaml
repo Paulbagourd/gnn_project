@@ -1,0 +1,15 @@
+run:
+  steps: [00_sample]
+  force: false
+
+params:
+  sample:
+    input_csv: "data/sample/abstracts.csv"
+    date_column: "publication_date"
+    text_column: "abstract"
+    keywords:
+      - "satellite security"
+      - "intrusion detection"
+      - "gnss"
+      - "anomaly detection"
+      - "non terrestrial networks"

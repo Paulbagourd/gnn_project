@@ -1,0 +1,44 @@
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+.vscode/
+.idea/
+
+# Data / outputs
+outputs/
+models/
+png_gnn/
+tmp/
+data/usecase_*/
+data/**/outputs/
+data/**/article_results/
+data/**/forensic_*/
+data/**/iso_compare_*/
+data/**/rerun_*/
+data/**/1_raw_data/
+docs/data/usecase_*/
+docs/data/**/outputs/
+docs/data/**/article_results/
+docs/**/*.pdf
+docs/**/*.docx
+docs/**/*.pptx
+
+# Packaged/derived archives
+*.zip
+
+# LaTeX build artifacts
+*.aux
+*.log
+*.out
+*.fdb_latexmk
+*.fls
+*.synctex.gz
+*.bbl
+*.blg
+
+# Temp files
+.tmp*
+tmp_*
+tmp.py

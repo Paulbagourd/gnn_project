@@ -1,0 +1,227 @@
+run:
+  steps: [01_extract, 02_keywords, 03_refined, 04_build_graph, 05_train_gnn, 06_predict]  # Ordered pipeline steps to execute
+  force: false  # Regenerate outputs even when cached results exist
+  up_to: null  # Optional cutoff step name (null = run all)
+
+paths:
+  raw_dir: "1_raw_data"  # Root directory for pipeline artefacts
+  external: null  # Optional directory for externally prepared resources
+
+params:
+  # ---- step_01 (extract & balancing) ----
+  language: "en"  # Language filter applied to OpenAlex queries
+  start_year: 1987  # Earliest publication year to keep
+  random_state: 42  # Seed for reproducible sampling/balancing
+  chunk_size: 200000  # Maximum OpenAlex records fetched per request
+  spike_win: 6  # Moving-window size (months) for spike detection
+  spike_cap: 0.80  # Maximum relative spike height before clipping
+  sigma_mult: 3.0  # Standard-deviation multiplier used for spike flagging
+  min_abs_bump: 200  # Minimum absolute increase needed to accept a spike
+  weight_alpha: 0.5  # Alpha parameter for spike-score smoothing
+  weight_tau: 0.85  # Tau parameter controlling spike-score decay
+  fetch_pages: false # When false, reuse existing stored pages instead of fetching from OpenAlex
+  filter_types: true  # Drop works whose type is outside allowed_types
+  filter_gbif: true   # Remove GBIF-style dataset records
+  allowed_types:  # Document types retained from OpenAlex responses
+    - journal-article
+    - proceedings-article
+    - preprint
+    - book-chapter
+  gbif_doi_prefixes:  # DOI prefixes treated as GBIF content to drop
+    - "10.15468"
+  gbif_phrases:  # Text patterns used to filter GBIF-related abstracts
+    - "species occurrences"
+    - "taxonkey"
+    - "hasgeospatialissue"
+    - "gbif.org"
+    - "naturalis biodiversity center"
+    - "biodiversity center nl"
+    - "dataset includes records"
+    - "constituent datasets"
+    - "datasets records"
+    - "dataset containing species"
+    - "containing species occurrences"
+
+  # ---- step_02 (keyword extraction) ----
+  compute: true  # Recompute keywords instead of reusing cached CSV
+  colab: false  # Offload step_02 to Google Colab when true
+  keybert_model: "sentence-transformers/allenai-specter"  # KeyBERT model identifier
+  keyword_topn: 20  # Keywords kept per document before deduplication
+  sample_papers: 1000  # Abstracts sampled for keyword extraction
+  threads: 2  # Parallel threads allocated to the extractor
+  abstracts_text_col: "Abstract"  # Column name containing abstract text
+  abstracts_candidates: ["abstracts.parquet","abstracts.csv"]  # Candidate files for abstracts
+  keyword_nr_candidates: 80  # Candidate phrases generated per abstract
+  keyword_diversity: 0.7  # Maximal marginal relevance diversity factor
+  keyword_stop_words: "english"  # Stop-word list forwarded to KeyBERT
+  keyword_strict_literal: true  # Enforce literal token matches when true
+  keyword_jaccard_threshold: 0.5  # Jaccard threshold for keyword dedupe
+  remove_keywords: ["abstract", "graphical abstract", "email share", "state", "deep", "content", "smart", "fauna", "forest"]  # Keywords dropped during post-processing
+  forced_keywords: []  # Keywords that must remain after cleaning
+
+  # ---- step_03 (refined collection + keywords) ----
+  refined_collection:
+    enabled: false  # When true, build a refined corpus before modelling
+    custom_refinement:  # When enabled, use a custom keyword TXT from step_02 outputs instead of extracted keywords
+      enabled: false
+      keywords_file: "custom_keywords.txt"
+    scan_column: "scan"  # Column that flags topics used for the refined scan
+    accepted_values: ["x"]  # Values treated as affirmative scans (case-insensitive)
+    scan_all_topics: false  # When true, ignore scan flags and consider all topics from papers.csv
+    topics_csv: null  # Optional override for the topics metadata (defaults to params.refined_topics_csv)
+    min_keyword_hits: 1  # Keep papers that match at least this many primary keywords
+    text_column: "Abstract"  # Column containing the raw abstract text
+    use_normalized_text: true  # Prefer a normalised abstract column when present
+    apply_norm_if_needed: true  # Create a normalised abstract column when missing
+    papers_csv: "papers.csv"  # Source papers file used for filtering
+    output_papers_csv: "refined_papers.csv"  # Filename emitted by the refined stage
+    write_match_counts: false  # Persist per-paper keyword hit counts for debugging
+
+  refined_keywords:
+    compute: true  # Run a second keyword extraction on the refined corpus
+    colab: false  # Offload refined keyword extraction to Colab when true
+    keybert_model: "sentence-transformers/allenai-specter"  # KeyBERT model identifier
+    keyword_topn: 20  # Keywords kept per document before deduplication
+    sample_papers: 1000  # Abstracts sampled for refined keyword extraction
+    threads: 2  # Parallel threads allocated to the extractor
+    keyword_nr_candidates: 80  # Candidate phrases generated per abstract
+    keyword_diversity: 0.7  # Maximal marginal relevance diversity factor
+    keyword_stop_words: "english"  # Stop-word list forwarded to KeyBERT
+    keyword_strict_literal: true  # Enforce literal token matches when true
+    keyword_jaccard_threshold: 0.5  # Jaccard threshold for keyword dedupe
+    remove_keywords: []  # Additional removals applied during refined keyword post-processing
+    forced_keywords: []  # Keywords forced into the refined extraction
+    remove_patterns: []  # Optional string patterns to drop from refined keywords
+    keyword_aliases: {}  # Optional alias map for refined keywords
+    ARE_THERE_KEYWORDS: []  # Optional refined-coverage checklist
+    show_progress: true  # Emit tqdm progress bars while extracting
+
+  # ---- step_04 (graph & modelling) ----
+  graph:
+    keywords_csv: "cleaned_keywords_to_build_graphs.csv"  # Default keyword-counts path
+    papers_csv: "papers.csv"  # Default papers metadata path
+    keywords_counts_csv_candidates: ["cleaned_keywords_to_build_graphs.csv"]  # Fallback keyword-count files
+    papers_csv_candidates: ["combined.csv", "papers.csv"]  # Fallback papers files
+
+    preprocess:
+      top_keywords: 1000  # Number of top keywords retained for the graph
+      number_months: null  # Max months to keep (null = entire history)
+      start_year_month: null  # Inclusive lower bound YYYY-MM (null = none)
+      end_year_month: null  # Inclusive upper bound YYYY-MM (null = none)
+      use_normalized_text: true  # Prefer pre-normalised abstract column
+      apply_norm_if_needed: true  # Create normalised abstracts when missing
+      normalize_keywords: true  # Normalise keyword tokens before matching
+      occurrence_mode: "token"  # Count keyword occurrences per token or doc
+      citation_weighting: "per_doc"  # Strategy for accumulating citations
+      k_roll: 6  # Rolling-window size used for smoothing tensors
+      min_periods: 1  # Minimum observations required inside the window
+      smooth_features: true  # Apply smoothing to feature tensors
+      smooth_coocc: false  # Apply smoothing to co-occurrence tensors
+      write_raw_tensors: true  # Persist both raw and smoothed tensors
+      scan_filter:  # Restrict graph scanning to a subset of topics when enabled
+        enabled: false  # When true, only topics flagged in the metadata are scanned
+        topics_csv: null  # Optional override; defaults to params.refined_topics_csv when null
+        column: "scan"  # Column containing the scan marker
+        accepted_values: ["x"]  # Values treated as affirmative markers (case-insensitive)
+      fallback_to_all: true  # When true, skip filtering if no topics are flagged
+
+    paper_volume_reweight:
+      enabled: false  # When true, rescale monthly tensors to counteract volume drops
+      method: "ema"  # ema | rolling
+      smooth_span_months: 12  # Window/span length for the smoother
+      min_factor: 0.2  # Lower clamp for scaling factors
+      max_factor: 5.0  # Upper clamp for scaling factors
+      counts_csv: null  # Optional override for the papers CSV used to compute counts
+      date_column: "publication_date"  # Column containing the publication date
+
+    tail_correction:
+      roll_win_detect: 6  # Window size used to detect tail breakpoints
+      fit_months_min: 24  # Minimum months considered during tail fitting
+      fit_months_max: 84  # Maximum months considered during tail fitting
+      drop_tol_pct: 0.05  # Allowed fractional drop before correction triggers
+      decline_run: 3  # Consecutive months that must stay below the threshold
+      smooth_coeff_window: 3  # Rolling average applied to correction factors
+      clip_min: 0.5  # Lower bound for correction multipliers
+      clip_max: null  # Upper bound for correction multipliers (null = none)
+      epsilon: 1e-8  # Numerical stability constant for ratios
+
+    preview:
+      emergence_mode: "raw"  # Transformation applied before preview plots
+      epsilon: 1e-8  # Stability constant used by ratio/pct transforms
+      feature_names: ["cited_by_count","oc_freq","edge_weight"]  # Expected feature labels
+      feature_weights: [0.0, 0.5, 0.5]  # Weights for aggregate FW line
+      last_years: 0  # Restrict preview to most recent N years (0 = all)
+      dpi: 180  # DPI for preview figures
+      plot_preview: true  # Emit diagnostic preview plots when true
+
+    remove_keywords: []  # Optional extra removals applied during graph prep
+    drop_keywords: "drop_fully_inactive"  # Keyword drop policy: drop_never_cited|drop_never_occured|drop_fully_inactive|drop_never_cited_or_occured|none
+    show_progress: false  # Emit tqdm progress bars during step execution
+
+  # ---- step_05 (training & prediction) ----
+  predict:
+    plot:
+      xtick_step: 100  # Spacing between node tick labels on heatmaps
+      cap_pct: 95.0  # Percentile cap applied to heatmap colour scales
+      topk_heatmap: 0  # When >0, emit an additional top-K heatmap for the selected feature
+      topk_heatmap_date: null  # Optional ISO date (YYYY-MM or YYYY-MM-DD) to freeze the Top-K snapshot
+      topk_heatmap_date_file: null  # Optional path to a text file containing the freeze date
+      topk_heatmap_from_date: null  # Optional ISO date to trim the Top-K heatmap (x-axis) from this point onward
+      topk_heatmap_feature: "oc_freq"  # Feature name to use for the Top-K heatmap
+
+    cfg_defaults:
+      EMERGENCE_MODE: "raw"  # Default emergence mode for modelling
+      EPSILON: 1e-8  # Default stability constant for transforms
+      LAST_YEARS: 0  # History retained before constructing windows
+      FORECAST: 8  # Forecast horizon in months
+      TEMP_WINDOW: 12  # Temporal window length supplied to the model
+      FEATURE_NAMES_DEFAULT: ["cited_by_count", "oc_freq", "edge_weight"]  # Fallback feature names
+      FW: [0.0, 0.5, 0.5]  # Feature weights used for aggregate targets
+      HIDDEN_CHANNELS: 64  # Hidden dimension of transformer layers
+      NUM_HEADS: 4  # Attention heads per transformer layer
+      DROPOUT: 0.25  # Dropout probability applied across the model
+      USE_POSENC: true  # Use sinusoidal positional encodings
+      USE_CAUSAL_MASK: true  # Apply causal masking in temporal attention
+      NODE_ONLY: false  # Disable message passing when true
+      GRAPH_GATE: true  # Blend graph and node features via a learned gate
+      COPY_HEAD: false  # Add residual copy head using last frame
+      EDGE_SELF_LOOPS: false  # Inject self-loops before message passing
+      EDGE_NORM: "none"  # Edge-weight normalisation strategy
+      EPOCHS: 9  # Maximum training epochs
+      LR: 0.001  # Optimiser learning rate
+      WD: 0.00001  # Weight decay applied during optimisation
+      PATIENCE: 3  # Early-stopping patience in epochs
+      MIN_DELTA: 0.001  # Minimum improvement to reset early stopping
+      TARGET_MODE: "residual"  # Target formulation used for training
+      LOSS_SPACE: "raw"  # Domain in which loss is computed
+      PER_NODE_STD: false  # Standardise targets per node before training
+      SPLIT_FRACS: [0.6, 0.2, 0.2]  # Fractions for train/val/test splits
+      LOSS_FN: "rmse"  # Primary loss function
+      HUBER_DELTA: 1.0  # Delta parameter when LOSS_FN == huber
+      PLOT_DIR: "plots"  # Directory for training plots
+      INPUTS_DIR: "plots/inputs_seen"  # Directory for previewed inputs
+      PLOT_METRIC: "rmse"  # Metric visualised on training curves
+      PLOT_INPUT_PREVIEWS: true  # Re-export the exact Xt tensors seen during training
+      HEATMAP: "viridis"  # Matplotlib colour map for heatmaps
+      DPI: 180  # DPI used for training figures
+      XTICK_STEP: 100  # Node tick spacing on training heatmaps
+      CAP_PCT: 95.0  # Percentile cap for training heatmaps
+      SHOW_FIGS: true  # Display figures interactively when true
+      LOG_TRAIN_RAW: false  # Log raw training curves before smoothing
+      TOPK_RECENT: true  # Generate top-K recent keyword plots
+      TOPK_K: 20  # Number of keywords in the top-K plot
+      TOPK_WORDCLOUD: 20  # Number of keywords in each feature word cloud
+      TOPK_CORR_K: 20  # Keywords used when building adjacency/correlation diagnostics
+      TOPK_CORR_FROM_DATE: null  # Optional ISO date to bound correlation window (inclusive)
+      TOPK_CORR_WINDOW_MONTHS: 0  # Rolling window length (months) if from_date not specified (0 = full history)
+      TOPK_CORR_USE_DIFF: ["log", "raw"]  # Difference modes highlighted on the correlation plots
+      TOPK_CORR_LINFITS: true  # Fit linear trends on correlation edges
+      TOPK_BUBBLE_K: 20  # Keywords shown on the bubble network diagram
+      TOPK_BUBBLE_WINDOW_MONTHS: 24  # Window (months) used for recent vs. past edge comparisons
+      TOPK_BUBBLE_DIFF_TOL: 0.0  # Minimum difference required before colouring an edge
+      TOPK_BUBBLE_MAX_EDGES: 200  # Maximum number of edges drawn on the bubble plot
+      TOPK_BUBBLE_TREND_MODE: "diff"  # Metric driving edge colours (diff|slope|percentage)
+
+    cfg_overrides: {}  # Per-run overrides layered on top of cfg_defaults
+    topk_predict: 20  # Number of top predictions exported after training
+    reuse_graph_outputs: false  # When true, reuse step_04 artifacts instead of regenerating

@@ -1,0 +1,299 @@
+paths:
+  raw_dir: "."  # Use the current working directory for raw artefacts
+
+run:
+  steps: [01_extract, 02_keywords, 03_refined, 04_graph, 05_predict]  # Ordered pipeline steps
+  force: false  # Regenerate outputs when true
+  up_to: null  # Optional cutoff step (null = run all)
+
+params:
+
+  # ---- step_01 (extract from OpenAlex) ----
+  openalex_mailto: "paul.bagourd.ar@gmail.com"  # Contact email for OpenAlex requests
+  topics_search_seed:  # Domain-specific topics driving OpenAlex queries
+    # Direct ALife terminology and canonical exemplars
+    - "Artificial Life"
+    - "Computational Artificial Life"
+    - "Digital Organisms"
+    - "Avida artificial life platform"
+    - "Conway's Game of Life"
+    - "Lenia artificial life"
+    - "Cellular Automata"
+    - "Continuous Cellular Automata"
+    - "Reaction-Diffusion Systems"
+    - "Artificial Morphogenesis"
+    - "Artificial Chemistries"
+    - "Artificial Ecosystems"
+    - "Virtual Creatures"
+    - "Agent-based Modeling"
+    - "Agent-based Simulation"
+    - "Boids flocking"
+    - "Swarm Robotics"
+    - "Swarm Intelligence"
+    - "Collective Intelligence"
+    - "Collective Adaptive Systems"
+    - "Evolutionary Robotics"
+    - "Morphogenetic Robotics"
+    - "Evolutionary Developmental Robotics"
+    - "Morphological Computation"
+    - "Embodied Intelligence"
+    - "Autonomous Agents"
+    - "Artificial Societies"
+    - "Artificial Societies and Social Simulation"
+    - "Procedural Animation"
+    # Broader OpenAlex topic labels where ALife work is clustered
+    - "Cellular Automata and Applications"
+    - "Natural Computing"
+    - "Evolutionary Computation"
+    - "Bio-inspired Computing"
+    - "Bio-inspired Robotics"
+    - "Computability, Logic, AI Algorithms"
+    - "DNA and Biological Computing"
+    - "Complex Systems"
+    - "Complex Network Dynamics"
+    - "Complex Adaptive Systems"
+    - "Nonlinear Dynamics and Pattern Formation"
+    - "Morphogenetic Engineering"
+    - "Evolutionary Game Theory"
+    - "Synthetic Biology and Artificial Cells"
+  refined_topics_csv: refined_topics.csv  # Curated topic list used during extraction
+  per_page: 200  # Maximum OpenAlex records fetched per request
+  max_workers: 3  # Parallel request threads
+  request_sleep: 0.25  # Delay between request bursts (seconds)
+  max_pages_per_topic: 0  # Topic-level page cap (0 = no cap)
+  max_total_pages: 0  # Global page cap across topics (0 = no cap)
+  stop_after_seconds: 0  # Time limit for extraction (0 = unlimited)
+  type_filter: null # "journal-article|proceedings-article|preprint|book-chapter"  # Allowed document types allow all : "*"
+  language: "en"  # Restrict results to English-language abstracts
+  filter_types: false  # Keep works regardless of OpenAlex document type
+  filter_gbif: true   # Keep GBIF-related records
+  fetch_pages: true  # Skip OpenAlex fetch when set to false (reuse existing stored pages)
+  relevant_columns:  # Columns persisted to combined.csv
+    - id
+    - title
+    - publication_date
+    - language
+    - doi
+    - cited_by_count
+    - primary_topic.id
+    - primary_topic.display_name
+    - Abstract
+    - type
+  start_year: 1987  # Earliest publication year kept during balancing
+  chunk_size: 200000  # CSV rows processed per chunk when streaming merges
+  random_state: 42  # RNG seed so sampling and redistribution stay deterministic
+  spike_win: 6  # Months to look backward/forward when smoothing monthly spikes
+  spike_cap: 0.8  # Maximum share of a spike month that can be moved elsewhere
+  sigma_mult: 3.0  # Standard-deviation multiplier for spike detection threshold
+  min_abs_bump: 200  # Minimum excess volume that triggers spike redistribution
+  weight_alpha: 0  # Blend factor between observed monthly share and uniform target
+  weight_tau: 1  # Target mean keep probability applied during final sampling
+
+  # ---- step_02 (keywords) ----
+  compute: true  # Regenerate keywords locally
+  colab: true  # Do not delegate to Colab for this use case
+  keybert_model: "sentence-transformers/allenai-specter"  # KeyBERT model identifier
+  keybert_model_path: "models/allenai-specter"  # Local cache directory for the model
+  keyword_ngram: [2, 3]  # N-gram range for candidate phrases
+  sample_papers: 3000  # Abstracts sampled for keyword extraction
+  keyword_topn: 15  # Keywords kept per abstract
+  threads: 4  # Parallel extraction threads
+  keyword_nr_candidates: 80  # Raw candidate phrases per abstract
+  keyword_diversity: 0.6  # Diversity factor for MMR
+  keyword_stop_words: ["english", "paper", "proposed", "method", "results", "demonstrate", "abstract", "graphical", "email"]  # Stop-word list for KeyBERT
+  additional_keywords:
+    - "cyber-physical systems"
+    - "evolutionary cyber defense"
+    - "game of life"
+    - "alife"
+    - "conway"
+  keyword_strict_literal: true  # Enforce literal token matches
+  keyword_jaccard_threshold: 0.5  # Jaccard similarity cap when deduplicating
+  forced_keywords: []
+  keyword_aliases:
+    open-ended evolution: ["open-ended evolution", "open ended evolution"]
+    evolutionary robotics: ["evolutionary robotics", "evo-robotics", "evolutionary robot"]
+    artificial chemistries: ["artificial chemistry", "artificial chemistries"]
+    swarm robotics: ["swarm robotics", "swarm robot", "swarm-based robotics"]
+    cellular automata: ["cellular automata", "cellular automaton", "continuous cellular automata"]
+    game of life: ["game of life", "conway's game of life", "conways game of life"]
+    reaction diffusion: ["reaction diffusion", "reaction-diffusion", "reaction diffusion system"]
+    agent-based modeling: ["agent based modeling", "agent-based model", "agent based simulation"]
+  ARE_THERE_KEYWORDS: ["artificial life", "digital organisms", "cellular automata", "game of life", "lenia", "reaction diffusion", "agent-based modeling", "evolutionary robotics"]  # Coverage check list
+  remove_keywords: ["have been","http www","neural network","widely used","global navigation satellite","existing methods","support vector","case studies","future research","long term","simulation results","decision making","time series","cloud computing","point clouds","intrusion detection systems","title abstract","title abstract title","abstract title","machine learning ml","energy consumption","artificial intelligence ai","high accuracy","recent years","cyber attacks","extensive experiments","paper presents","paper proposes","real world","proposed method","results demonstrate","graphical abstract","email share","state","things iot","deep","content","smart","fauna","forest","et al."]  # Keywords removed during keyword post-processing
+  remove_patterns: ["math ","mml","http","xmlns","org ","ieee ","and ","in ","of "," is","the "," and"," are"," to"," this"]
+  device: "auto"  # Allow the pipeline to auto-select CPU/GPU
+
+  # ---- step_03 (refined collection + keywords) ----
+  refined_collection:
+    enabled: true
+    custom_refinement:
+      enabled: true
+      keywords_file: "custom_keywords.txt"
+    scan_column: "scan"
+    accepted_values: ["x", "", "nan"]
+    scan_all_topics: true
+    topics_csv: null
+    min_keyword_hits: 1
+    text_column: "Abstract"
+    use_normalized_text: true
+    apply_norm_if_needed: true
+    papers_csv: "papers.csv"
+    output_papers_csv: "refined_papers.csv"
+    write_match_counts: false
+
+  refined_keywords:
+    compute: true
+    colab: false
+    keybert_model: "sentence-transformers/allenai-specter"
+    keybert_model_path: "models/allenai-specter"
+    keyword_ngram: [2, 3]
+    sample_papers: 1074
+    keyword_topn: 20
+    threads: 4
+    keyword_nr_candidates: 80
+    keyword_diversity: 0.6
+    keyword_stop_words: ["english", "paper", "proposed", "method", "results", "demonstrate", "abstract", "graphical", "email"]
+    keyword_strict_literal: true
+    keyword_jaccard_threshold: 0.5
+    keyword_aliases:
+      open-ended evolution: ["open-ended evolution", "open ended evolution"]
+      evolutionary robotics: ["evolutionary robotics", "evo-robotics", "evolutionary robot"]
+      artificial chemistries: ["artificial chemistry", "artificial chemistries"]
+      swarm robotics: ["swarm robotics", "swarm robot", "swarm-based robotics"]
+      cellular automata: ["cellular automata", "cellular automaton", "continuous cellular automata"]
+      game of life: ["game of life", "conway's game of life", "conways game of life"]
+      reaction diffusion: ["reaction diffusion", "reaction-diffusion", "reaction diffusion system"]
+      agent-based modeling: ["agent based modeling", "agent-based model", "agent based simulation"]
+    ARE_THERE_KEYWORDS: ["artificial life", "digital organisms", "cellular automata", "game of life", "lenia", "reaction diffusion", "agent-based modeling", "evolutionary robotics"]
+    remove_keywords: ["have been","http www","neural network","widely used","global navigation satellite","existing methods","support vector","case studies","future research","long term","simulation results","decision making","time series","cloud computing","point clouds","intrusion detection systems","title abstract","title abstract title","abstract title","machine learning ml","energy consumption","artificial intelligence ai","high accuracy","recent years","cyber attacks","extensive experiments","paper presents","paper proposes","real world","proposed method","results demonstrate","graphical abstract","email share","state","things iot","deep","content","smart","fauna","forest","et al."]
+    remove_patterns: ["math ","mml","http","xmlns","org ","ieee ","and ","in ","of "," is","the "," and"," are"," to"," this"]
+    show_progress: true
+
+  # ---- step_04 (graph & modelling) ----
+  graph:
+    keywords_csv: "cleaned_keywords_to_build_graphs.csv"  # Default keyword-counts path
+    papers_csv: "papers.csv"  # Default papers metadata path
+    keywords_counts_csv_candidates: ["cleaned_keywords_to_build_graphs.csv"]  # Fallback keyword-count files
+    papers_csv_candidates: ["combined.csv", "papers.csv"]  # Fallback papers files
+
+    preprocess:
+      top_keywords: 200  # Limit the graph to the 200 most frequent keywords
+      number_months: null  # Keep the full time range
+      start_year_month: null  # No lower time bound
+      end_year_month: 2025-10  # No upper time bound
+      use_normalized_text: true  # Prefer the normalised abstract column
+      apply_norm_if_needed: true  # Create normalised abstracts when missing
+      normalize_keywords: true  # Normalise keyword tokens before matching
+      occurrence_mode: "token"  # Count token-level occurrences
+      citation_weighting: "per_doc"  # Add citation weight once per document
+      k_roll: 6  # Rolling window for smoothing tensors
+      min_periods: 1  # Minimum observations inside the window
+      smooth_features: true  # Smooth per-keyword feature tensors
+      smooth_coocc: false  # Leave co-occurrence tensor unsmoothed
+      write_raw_tensors: true  # Persist both raw and smoothed tensors
+      scan_filter:
+        enabled: false  # Only scan the topics explicitly flagged in refined_topics.csv
+        column: "scan"
+        accepted_values: ["x"]
+        fallback_to_all: true
+
+    tail_correction:
+      roll_win_detect: 6  # Window size for tail breakpoint detection
+      fit_months_min: 24  # Minimum months considered during fitting
+      fit_months_max: 84  # Maximum months considered during fitting
+      drop_tol_pct: 0.05  # Allowed fractional drop before correction triggers
+      decline_run: 3  # Consecutive months required below the threshold
+      smooth_coeff_window: 3  # Rolling average applied to correction factors
+      clip_min: 0.5  # Lower bound for correction multipliers
+      clip_max: null  # Upper bound for correction multipliers (null = none)
+      epsilon: 1e-8  # Numerical stability constant for ratios
+
+    preview:
+      emergence_mode: "raw"  # Transformation applied before previewing tensors
+      epsilon: 1e-8  # Stability constant used by ratio/pct transforms
+      feature_names: ["cited_by_count","oc_freq","edge_weight"]  # Expected feature labels
+      feature_weights: [0.0, 0.5, 0.5]  # Weights for the aggregate FW line
+      last_years: 0  # Keep the entire time range in previews
+      dpi: 180  # DPI for preview plots
+      plot_preview: true  # Emit preview plots for diagnostics
+
+    keyword_aliases:
+      open-ended evolution: ["open-ended evolution", "open ended evolution"]
+      evolutionary robotics: ["evolutionary robotics", "evo-robotics", "evolutionary robot"]
+      artificial chemistries: ["artificial chemistry", "artificial chemistries"]
+      swarm robotics: ["swarm robotics", "swarm robot", "swarm-based robotics"]
+      cellular automata: ["cellular automata", "cellular automaton", "continuous cellular automata"]
+      game of life: ["game of life", "conway's game of life", "conways game of life"]
+      reaction diffusion: ["reaction diffusion", "reaction-diffusion", "reaction diffusion system"]
+      agent-based modeling: ["agent based modeling", "agent-based model", "agent based simulation"]
+
+    drop_keywords: "drop_never_cited_or_occured"  # Keyword drop policy for graph tensors with option "drop_never_cited", "drop_never_occured", "drop_fully_inactve", "drop_never_cited_or_occured" 
+    show_progress: false  # Suppress tqdm progress bars in logs
+
+  # ---- step_05 (predict) ----  
+  predict:
+    plot:
+      xtick_step: 100  # Node tick spacing on heatmaps
+      cap_pct: 95.0  # Percentile cap applied to heatmap colour scales
+      topk_heatmap: 20  # Size of the optional Top-K heatmap (0 disables it)
+      topk_heatmap_date: 2025-10  # ISO date (YYYY-MM or YYYY-MM-DD) when freezing the Top-K view
+      topk_heatmap_date_file: null  # Path to text file containing the freeze date (overrides topk_heatmap_date when set)
+      topk_heatmap_from_date: 2020-01  # ISO date to start the Top-K heatmap timeline (optional)
+      topk_heatmap_feature: ["oc_freq", "edge_weight", "cited_by_count"]  # Features used for the Top-K heatmap
+    topk_predict: 20  # Number of top predictions exported after training
+    reuse_graph_outputs: false  # Skip rerunning step_04 and reuse its artifacts
+
+    cfg_defaults:
+      EMERGENCE_MODE: "raw"  # Default emergence mode for modelling
+      EPSILON: 1e-8  # Default stability constant for transforms
+      LAST_YEARS: 0  # History retained before constructing windows
+      FORECAST: 8  # Forecast horizon in months
+      TEMP_WINDOW: 12  # Temporal window length supplied to the model
+      FEATURE_NAMES_DEFAULT: ["cited_by_count", "oc_freq", "edge_weight"]  # Fallback feature names
+      FW: [0.0, 0.5, 0.5]  # Feature weights used for aggregate targets
+      HIDDEN_CHANNELS: 64  # Hidden dimension of transformer layers
+      NUM_HEADS: 4  # Attention heads per transformer layer
+      DROPOUT: 0.25  # Dropout probability applied across the model
+      USE_POSENC: true  # Use sinusoidal positional encodings
+      USE_CAUSAL_MASK: true  # Apply causal masking in temporal attention
+      NODE_ONLY: false  # Disable message passing when true
+      GRAPH_GATE: true  # Blend graph and node features via a learned gate
+      COPY_HEAD: false  # Add residual copy head using last frame
+      EDGE_SELF_LOOPS: false  # Inject self-loops before message passing
+      EDGE_NORM: "none"  # Edge-weight normalisation strategy
+      EPOCHS: 9  # Maximum training epochs
+      LR: 0.001  # Optimiser learning rate
+      WD: 0.00001  # Weight decay applied during optimisation
+      PATIENCE: 3  # Early-stopping patience in epochs
+      MIN_DELTA: 0.001  # Minimum improvement to reset early stopping
+      TARGET_MODE: "absolute"  # Target formulation used for training
+      LOSS_SPACE: "raw"  # Domain in which loss is computed
+      PER_NODE_STD: false  # Standardise targets per node before training
+      SPLIT_FRACS: [0.6, 0.2, 0.2]  # Fractions for train/validation/test splits
+      LOSS_FN: "rmse"  # Primary loss function
+      HUBER_DELTA: 1.0  # Delta parameter when LOSS_FN == huber
+      PLOT_DIR: "plots"  # Directory for training plots
+      INPUTS_DIR: "plots/inputs_seen"  # Directory for previewed inputs
+      PLOT_METRIC: "rmse"  # Metric visualised on training curves
+      HEATMAP: "viridis"  # Matplotlib colour map for heatmaps
+      DPI: 180  # DPI used for training figures
+      XTICK_STEP: 100  # Node tick spacing on training heatmaps
+      CAP_PCT: 95.0  # Percentile cap for training heatmaps
+      SHOW_FIGS: true  # Display figures interactively when true
+      LOG_TRAIN_RAW: false  # Log raw training curves before smoothing
+      TOPK_RECENT: true  # Generate top-K recent keyword plots
+      TOPK_K: 25  # Number of keywords in the top-K plot
+      TOPK_WORDCLOUD: 40  # Number of keywords in each feature word cloud
+      TOPK_CORR_K: 40  # Keywords included in the correlation diagnostics
+      TOPK_CORR_FROM_DATE: 2022-01  # ISO date bounding the correlation window (inclusive)
+      TOPK_CORR_WINDOW_MONTHS: 24  # Rolling window length when FROM_DATE is not enough
+      TOPK_CORR_USE_DIFF: ["log", "raw"]  # Difference modes used for the correlation plots
+      TOPK_CORR_LINFITS: true  # Fit linear trends on correlation edges
+      TOPK_BUBBLE_K: 20  # Keywords shown on the bubble network diagram
+      TOPK_BUBBLE_WINDOW_MONTHS: 24  # Months used to compute recent/past comparisons
+      TOPK_BUBBLE_DIFF_TOL: 0.0  # Minimum difference needed before colouring edges
+      TOPK_BUBBLE_MAX_EDGES: 200  # Edge cap for the bubble visualisation
+      TOPK_BUBBLE_TREND_MODE: "percentage"  # How edge trends are computed (diff|slope|percentage)
+
+    cfg_overrides: {}  # Per-run overrides layered on top of cfg_defaults

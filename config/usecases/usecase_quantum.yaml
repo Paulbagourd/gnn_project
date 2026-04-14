@@ -1,0 +1,297 @@
+# Configuration specialising the base defaults for the quantum-computing
+# use case. Every field mirrors config/base.yaml so changes stay explicit.
+
+paths:
+  raw_dir: "."  # Keep default raw directory; override if quantum needs isolation.
+
+run:
+  steps: [01_extract, 02_keywords, 03_refined, 04_graph, 05_predict]  # Pipeline steps executed for this scenario.
+  force: false  # Leave false to reuse cached artefacts unless --force is supplied.
+  up_to: null  # Optional shortcut to stop the pipeline early.
+
+params:
+
+  # ---- step_01 (extract from OpenAlex) ----
+  openalex_mailto: "paul.bagourd.ar@gmail.com"  # Contact email passed to OpenAlex.
+  topics_search_seed:  # Quantum-focused topics seeding the OpenAlex search.
+    - "Quantum Computing"
+    - "Quantum Error Correction"
+    - "Quantum Machine Learning"
+    - "Quantum Key Distribution"
+    - "Quantum Simulation"
+    - "Trapped Ion Quantum Computing"
+    - "Superconducting Qubits"
+    - "Photonic Quantum Computing"  # Extend as needed.
+    - "Superconducting quantum computing"
+    - "Quantum circuits"
+    - "Transmon qubits"
+  refined_topics_csv: refined_topics.csv  # Hand-curated topics list for this use case.
+  per_page: 200  # Records fetched per page.
+  max_workers: 3  # Concurrent request pool size.
+  request_sleep: 0.25  # Delay between request bursts (seconds).
+  max_pages_per_topic: 0  # Topic-level page cap (0 keeps all).
+  max_total_pages: 0  # Global page cap (0 keeps all).
+  stop_after_seconds: 0  # Time limit for extraction (0 disables).
+  type_filter: null #"journal-article|proceedings-article|preprint|book-chapter"  # Allowed document types (null = all).
+  language: "en"  # Restrict to English-language abstracts.
+  filter_types: false  # Drop works whose type is outside the allowlist.
+  filter_gbif: false  # Remove GBIF-style dataset records.
+  fetch_pages: true  # When false, reuse existing stored pages instead of fetching.
+  relevant_columns:  # Columns persisted to combined.csv for later steps.
+    - id
+    - title
+    - publication_date
+    - language
+    - doi
+    - cited_by_count
+    - primary_topic.id
+    - primary_topic.display_name
+    - Abstract
+    - type
+  start_year: 1987  # Earliest publication year kept during balancing.
+  chunk_size: 200000  # CSV rows processed per chunk when streaming merges.
+  random_state: 42  # RNG seed so sampling and redistribution stay deterministic.
+  spike_win: 6  # Months to look backward/forward when smoothing monthly spikes.
+  spike_cap: 0.8  # Maximum share of a spike month that can be moved elsewhere.
+  sigma_mult: 3.0  # Standard-deviation multiplier for spike detection threshold.
+  min_abs_bump: 200  # Minimum excess volume that triggers spike redistribution.
+  weight_alpha: 0.5  # Blend factor between observed monthly share and uniform target.
+  weight_tau: 0.85  # Target mean keep probability applied during final sampling.
+
+  # ---- step_02 (keywords) ----
+  compute: false  # Use outputs generated externally (e.g. Colab) instead of recomputing.
+  colab: false  # Delegate the extraction workflow to the Colab notebook.
+  keybert_model: "sentence-transformers/allenai-specter"  # KeyBERT model identifier shared with other use cases.
+  keybert_model_path: "models/allenai-specter"  # Directory where the KeyBERT model gets cached locally.
+  keyword_ngram: [2, 3]  # N-gram window for candidate keyword generation.
+  sample_papers: 1000  # Abstracts sampled for keyword extraction (larger than base).
+  keyword_topn: 20  # Keywords retained per paper before de-duplication.
+  threads: 4  # Thread count for any local processing performed.
+  keyword_nr_candidates: 80  # Candidate phrases generated per abstract prior to scoring.
+  keyword_diversity: 0.7  # Diversity factor balancing relevance and novelty.
+  keyword_stop_words: "english"  # Stop-word list for KeyBERT.
+  keyword_strict_literal: true  # Enforce literal keyword matches (avoids fuzzy matches).
+  keyword_jaccard_threshold: 0.5  # Maximum Jaccard similarity allowed between keywords.
+  forced_keywords: []
+  keyword_aliases:
+    quantum circuit: ["quantum circuit","quantum circuits"]
+    quantum error correction : ["error correction","quantum error correction"]
+    quantum state: ["quantum state","quantum states"]
+    quantum algorithm: ["quantum algorithm", "quantum algorithms"]
+    qkd: ["quantum key","key distribution qkd","quantum key distribution"]
+    quantum information theory: ["quantum information processing", "quantum information","quantum information theory"]
+    quantum computing: ["quantum computation qc","quantum computation", "quantum systems","quantum computing", "quantum machine", "quantum devices", "quantum computer", "quantum computers"]
+    quantum machine learning: ["quantum machine learning", "quantum ml", "qml"]
+    qkd: ["quantum key distribution", "qkd","quantum key","key distribution qkd"]
+  ARE_THERE_KEYWORDS: ["QKD", "quantum key distribution"]  # Phrases that should appear in the output keyword set.
+  remove_keywords: ["abstract", "graphical abstract", "email share", "state", "deep"]  # Keywords removed during post-processing.
+  remove_patterns: ["org ", "ieee ", "mml","http", "www"]
+  device: "auto"  # Prefer GPU acceleration if available for downstream tasks.
+
+  # ---- step_03 (refined collection + keywords) ----
+  refined_collection:
+    enabled: false
+    custom_refinement:
+      enabled: false
+      keywords_file: "custom_keywords.txt"
+    scan_column: "scan"
+    accepted_values: ["x", "", "nan"]
+    scan_all_topics: true
+    topics_csv: null
+    min_keyword_hits: 1
+    text_column: "Abstract"
+    use_normalized_text: true
+    apply_norm_if_needed: true
+    papers_csv: "papers.csv"
+    output_papers_csv: "refined_papers.csv"
+    write_match_counts: false
+
+  refined_keywords:
+    compute: false
+    colab: false
+    keybert_model: "sentence-transformers/allenai-specter"
+    keybert_model_path: "models/allenai-specter"
+    keyword_ngram: [2, 3]
+    sample_papers: 1000
+    keyword_topn: 20
+    threads: 4
+    keyword_nr_candidates: 80
+    keyword_diversity: 0.7
+    keyword_stop_words: ["english", "paper", "proposed", "method", "results", "demonstrate", "abstract", "graphical", "email"]
+    keyword_strict_literal: true
+    keyword_jaccard_threshold: 0.5
+    keyword_aliases: {}
+    forced_keywords: []
+    ARE_THERE_KEYWORDS: ["quantum key distribution", "qkd", "quantum error correction", "quantum machine learning"]
+    remove_keywords: ["abstract", "graphical abstract", "email share", "state", "deep"]
+    remove_patterns: ["org ", "ieee ", "mml", "http", "www"]
+    show_progress: false
+
+  # ---- step_04 (graph & modelling) ----
+  graph:
+    keywords_csv: "cleaned_keywords_to_build_graphs.csv"  # Canonical keyword-counts filename.
+    papers_csv: "papers.csv"  # Canonical papers metadata filename.
+    keywords_counts_csv_candidates: ["cleaned_keywords_to_build_graphs.csv"]  # Fallback keyword-count files.
+    papers_csv_candidates: ["combined.csv", "papers.csv"]  # Fallback papers files.
+
+    preprocess:
+      top_keywords: 1000  # Keep the top 1000 quantum keywords before graph construction.
+      number_months: null  # Temporal cropping (null = use entire history).
+      start_year_month: null  # Inclusive lower bound YYYY-MM (null = none).
+      end_year_month: null  # Inclusive upper bound YYYY-MM (null = none).
+      use_normalized_text: true  # Prefer the normalised abstract column.
+      apply_norm_if_needed: true  # Create normalised abstracts when missing.
+      normalize_keywords: true  # Normalise keyword tokens before matching.
+      occurrence_mode: "token"  # Count every token occurrence to highlight repeated mentions.
+      citation_weighting: "per_doc"  # Credit citations once per paper rather than per token.
+      k_roll: 6  # Rolling smoothing window for monthly tensors.
+      min_periods: 1  # Minimum observations inside the window.
+      smooth_features: true  # Smooth per-keyword feature tensors.
+      smooth_coocc: false  # Leave co-occurrence tensor unsmoothed.
+      write_raw_tensors: true  # Persist both raw and smoothed tensors.
+
+    tail_correction:
+      roll_win_detect: 6  # Window size for tail breakpoint detection.
+      fit_months_min: 24  # Minimum months considered during fitting.
+      fit_months_max: 84  # Maximum months considered during fitting.
+      drop_tol_pct: 0.05  # Allowed fractional drop before correction triggers.
+      decline_run: 3  # Consecutive months required below the threshold.
+      smooth_coeff_window: 3  # Rolling average applied to correction factors.
+      clip_min: 0.5  # Lower bound for correction multipliers.
+      clip_max: null  # Upper bound for correction multipliers (null = none).
+      epsilon: 1e-8  # Numerical stability constant for ratios.
+
+    preview:
+      emergence_mode: "raw"  # Transformation applied before previewing tensors.
+      epsilon: 1e-8  # Stability constant used by ratio/pct transforms.
+      feature_names: ["cited_by_count","oc_freq","edge_weight"]  # Expected feature labels.
+      feature_weights: [0.0, 0.5, 0.5]  # Weights for the aggregate FW line.
+      last_years: 0  # Keep the entire time range in previews.
+      dpi: 180  # DPI for preview plots.
+      plot_preview: true  # Emit preview plots for diagnostics.
+
+    plot:
+      xtick_step: 100  # Node tick spacing on heatmaps.
+      cap_pct: 95.0  # Percentile cap applied to heatmap colour scales.
+      topk_heatmap: 20  # Size of optional Top-K heatmap (0 disables extra output).
+      topk_heatmap_date: 2025-01  # ISO date (YYYY-MM or YYYY-MM-DD) for the frozen Top-K snapshot.
+      topk_heatmap_date_file: null  # Optional text file containing the freeze date (overrides topk_heatmap_date).
+      topk_heatmap_from_date: 2020-01  # Optional ISO date limiting the Top-K heatmap timeline on the x-axis.
+      topk_heatmap_feature: "oc_freq"  # Feature used when building the Top-K heatmap.
+
+    drop_keywords: "drop_fully_inactive"  # Keyword drop policy for graph tensors.
+    show_progress: false  # Suppress tqdm progress bars in logs.
+
+    cfg_defaults:
+      EMERGENCE_MODE: "raw"  # Default emergence mode for modelling.
+      EPSILON: 1e-8  # Default stability constant for transforms.
+      LAST_YEARS: 0  # History retained before constructing windows.
+      FORECAST: 8  # Forecast horizon in months.
+      TEMP_WINDOW: 12  # Temporal window length supplied to the model.
+      FEATURE_NAMES_DEFAULT: ["cited_by_count", "oc_freq", "edge_weight"]  # Fallback feature names.
+      FW: [0.0, 0.5, 0.5]  # Feature weights used for aggregate targets.
+      HIDDEN_CHANNELS: 64  # Hidden dimension of transformer layers.
+      NUM_HEADS: 4  # Attention heads per transformer layer.
+      DROPOUT: 0.25  # Dropout probability applied across the model.
+      USE_POSENC: true  # Use sinusoidal positional encodings.
+      USE_CAUSAL_MASK: true  # Apply causal masking in temporal attention.
+      NODE_ONLY: false  # Disable message passing when true.
+      GRAPH_GATE: true  # Blend graph and node features via a learned gate.
+      COPY_HEAD: false  # Add residual copy head using last frame.
+      EDGE_SELF_LOOPS: false  # Inject self-loops before message passing.
+      EDGE_NORM: "none"  # Edge-weight normalisation strategy.
+      EPOCHS: 9  # Maximum training epochs.
+      LR: 0.001  # Optimiser learning rate.
+      WD: 0.00001  # Weight decay applied during optimisation.
+      PATIENCE: 3  # Early-stopping patience in epochs.
+      MIN_DELTA: 0.001  # Minimum improvement to reset early stopping.
+      TARGET_MODE: "absolute"  # Target formulation used for training. choose 'absolute' or 'residual' depending on the goal
+      LOSS_SPACE: "raw"  # Domain in which loss is computed.
+      PER_NODE_STD: false  # Standardise targets per node before training.
+      SPLIT_FRACS: [0.6, 0.2, 0.2]  # Fractions for train/validation/test splits.
+      LOSS_FN: "rmse"  # Primary loss function.
+      HUBER_DELTA: 1.0  # Delta parameter when LOSS_FN == huber.
+      PLOT_DIR: "plots"  # Directory for training plots.
+      INPUTS_DIR: "plots/inputs_seen"  # Directory for previewed inputs.
+      PLOT_METRIC: "rmse"  # Metric visualised on training curves.
+      HEATMAP: "viridis"  # Matplotlib colour map for heatmaps.
+      DPI: 180  # DPI used for training figures.
+      XTICK_STEP: 100  # Node tick spacing on training heatmaps.
+      CAP_PCT: 95.0  # Percentile cap for training heatmaps.
+      SHOW_FIGS: true  # Display figures interactively when true.
+      LOG_TRAIN_RAW: false  # Log raw training curves before smoothing.
+      TOPK_RECENT: true  # Generate top-K recent keyword plots.
+      TOPK_K: 20  # Number of keywords in the top-K plot.
+      TOPK_WORDCLOUD: 40  # Number of keywords in each feature word cloud.
+      TOPK_CORR_K: 40  # Keywords included in the correlation diagnostics.
+      TOPK_CORR_FROM_DATE: 2022-01  # ISO date bounding the correlation window (inclusive).
+      TOPK_CORR_WINDOW_MONTHS: 24  # Rolling window length when FROM_DATE is not enough.
+      TOPK_CORR_USE_DIFF: ["log", "raw"]  # Difference modes used for the correlation plots.
+      TOPK_CORR_LINFITS: true  # Fit linear trends on correlation edges.
+      TOPK_BUBBLE_K: 20  # Keywords shown on the bubble network diagram.
+      TOPK_BUBBLE_WINDOW_MONTHS: 24  # Months used to compute recent/past comparisons.
+      TOPK_BUBBLE_DIFF_TOL: 0.0  # Minimum difference needed before colouring edges.
+      TOPK_BUBBLE_MAX_EDGES: 200  # Edge cap for the bubble visualisation.
+      TOPK_BUBBLE_TREND_MODE: "percentage"  # How edge trends are computed (diff|slope|percentage).
+
+    cfg_overrides: {}  # Reserved for ad-hoc overrides during experimentation.
+
+  # ---- step_05 (predict) ----
+  predict:
+    plot:
+      xtick_step: 100  # Node tick spacing on heatmaps.
+      cap_pct: 95.0  # Percentile cap applied to heatmap colour scales.
+      topk_heatmap: 20  # Size of the optional Top-K heatmap (0 disables it).
+      topk_heatmap_date: 2025-01  # ISO date when freezing the Top-K view.
+      topk_heatmap_date_file: null  # Path to text file containing the freeze date (overrides topk_heatmap_date).
+      topk_heatmap_from_date: 2020-01  # ISO date to start the Top-K heatmap timeline (optional).
+      topk_heatmap_feature: "oc_freq"  # Feature used for the Top-K heatmap.
+
+    cfg_defaults:
+      EMERGENCE_MODE: "raw"
+      EPSILON: 1e-8
+      LAST_YEARS: 0
+      FORECAST: 8
+      TEMP_WINDOW: 12
+      FEATURE_NAMES_DEFAULT: ["cited_by_count", "oc_freq", "edge_weight"]
+      FW: [0.0, 0.5, 0.5]
+      HIDDEN_CHANNELS: 64
+      NUM_HEADS: 4
+      DROPOUT: 0.25
+      USE_POSENC: true
+      USE_CAUSAL_MASK: true
+      NODE_ONLY: false
+      GRAPH_GATE: true
+      COPY_HEAD: false
+      EDGE_SELF_LOOPS: false
+      EDGE_NORM: "none"
+      EPOCHS: 9
+      LR: 0.001
+      WD: 0.00001
+      PATIENCE: 3
+      MIN_DELTA: 0.001
+      TARGET_MODE: "absolute"
+      LOSS_SPACE: "raw"
+      PER_NODE_STD: false
+      SPLIT_FRACS: [0.6, 0.2, 0.2]
+      LOSS_FN: "rmse"
+      HUBER_DELTA: 1.0
+      PLOT_DIR: "plots"
+      INPUTS_DIR: "plots/inputs_seen"
+      PLOT_METRIC: "rmse"
+      HEATMAP: "viridis"
+      DPI: 180
+      XTICK_STEP: 100
+      CAP_PCT: 95.0
+      SHOW_FIGS: true
+      LOG_TRAIN_RAW: false
+      TOPK_RECENT: true
+      TOPK_K: 20
+      TOPK_WORDCLOUD: 40
+      TOPK_CORR_K: 40
+      TOPK_CORR_FROM_DATE: 2022-01
+      TOPK_CORR_WINDOW_MONTHS: 24
+      TOPK_CORR_USE_DIFF: ["log", "raw"]
+      TOPK_CORR_LINFITS: true
+
+    cfg_overrides: {}

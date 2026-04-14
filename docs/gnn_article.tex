@@ -1,0 +1,1165 @@
+\documentclass{article}
+% chktex-file 2
+% chktex-file 3
+% chktex-file 8
+% chktex-file 12
+% chktex-file 13
+% chktex-file 18
+% chktex-file 24
+% chktex-file 36
+% chktex-file 37
+% chktex-file 38
+\usepackage{booktabs}
+\usepackage{geometry}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{graphicx}
+\usepackage{hyperref}
+\usepackage{microtype}
+\usepackage{caption}
+\usepackage{subcaption}
+\usepackage{tabularx}
+\usepackage{array}
+\usepackage{xcolor}
+\usepackage{comment}
+\usepackage{float}
+\captionsetup[table]{justification=centering}
+\captionsetup[figure]{position=bottom}
+\graphicspath{{docs/}{.}}
+% Short docs-side alias to keep Windows/TeX path lengths below the failing threshold.
+\newcommand{\cyberplotslive}{cyberplots}
+\newcommand{\cyberplotsdir}{\cyberplotslive/heatmaps}
+\newcommand{\cyberrelativeplotsdir}{\cyberplotslive/relative_evolution}
+\newcommand{\cyberrelativesmoothplotsdir}{\cyberplotslive/relative_evolution_smooth}
+\newcolumntype{Y}{>{\raggedright\arraybackslash}X}
+\geometry{margin=1in}
+
+\title{GNNs for Technology Monitoring: how much graph structure helps predicting emerging technologies?}
+\author{Paul Bagourd, Julian Jang-Jaccard}
+\date{\today}
+
+\begin{document}
+\maketitle
+
+
+\section*{Abstract}
+Scientific discovery and technological innovation are tightly interdependent processes, and their progress depends on sustained collaboration across domains, from fundamental theory to applied engineering. This suggests that tracking how such collaborations evolve over time may improve our understanding of technological adoption. In this paper, we investigate this hypothesis using neural network models on graph-structured data related to the cybersecurity in space domain. Our central objective is to determine whether the structure and temporal evolution of collaboration graphs provide informative signals about the future technological landscape of this domain. By modeling relational patterns among scientific and technical features such as citation and concept co-occurences, we aim to quantify the predictive value of graph topology beyond non-relational information alone.
+\newpage
+\section{Introduction}
+
+\subsection{Context}
+
+As governments and companies rely on accurate technological monitoring for their investment decisions, sound technological forecasts are essential \cite{coccia2005technometrics,lee2021review,haleem2019tf,calleja2020forecasting}. Regarding cyber security, the short lifecycle of the technologies in this domain further complicates conventional forecasting methods.
+As a result, cybersecurity-specific foresight complements expert judgement with algorithmic evidence, notably bibliometrics and other text-mining pipelines \cite{daim2016anticipating,dotsika2017disruptive,singer2014cybersecurity}.
+
+Bibliometric forecasting already benefits from a rich lineage of spatio-temporal models that treat topics as interacting signals over graph structures.
+Early systems relied on recurrent encoders applied independently to each topic, which captured temporal inertia but ignored cross-topic influence patterns \cite{he2019topicforecast,xu2020trendrnn}.
+SemNet-style efforts such as the study by Krenn and Zeilinger on quantum-physics foresight provided an influential early demonstration that keyword co-occurrence graphs can operate as predictive semantic networks,
+showing how literature-derived structures anticipate emerging research thrusts \cite{krenn2020predicting}.
+Building on that conceptual framing, a broad body of work on temporal graph learning explores how to model evolving connectivity in a domain-agnostic way. Architectures like DST-GTN, the Temporal Graph Attention Network (T-GAT), and the Impact4Cast knowledge-graph forecaster deploy dynamic adjacency matrices together with transformer-style attention blocks over progressive snapshots to fuse spatial and temporal cues, markedly improving forecasting accuracy \cite{li2021dstgtn,zhao2023tgat,gu2024impact4cast}.
+Such improved sensitivity is particularly relevant for short-term forecasting of technological convergence potential, synergetic convergence of existing technologies into qualitatively new systems is a powerful model of technological evolution.
+Our study aligns with this latter direction yet adapts it to the cybersecurity in space domain, a presumably fast-evolving domain. We create the co-occurrence graph every month from cleaned LLM-derived keywords, define a general emergence metric, and emit analyst-ready diagnostics.
+The specificity of this study, that has not been much explored in the current litterature so far, is that it insists on the benefits of the graph structure, testing different models to check if hidden structures in the graph topolgy evolution could be leveraged into better predictions.
+
+\subsection{Forecasting in technology monitoring}
+
+\subsubsection{Important distinction}
+
+In this study, technology monitoring is treated as a \emph{strategic sensing} task rather than a mechanism for discovering intrinsic technological capabilities.
+Bibliometric graph models forecast how scientific activity is likely to evolve given past publication, co-occurrence, and citation dynamics.
+In practice, they capture inertia effects in the science system (preferential attachment, thematic continuity, diffusion delays, and network reinforcement), not the intrinsic field performance of a technology.
+
+This distinction is central for defence-oriented use cases.
+The main institutional value is not to identify ``the next revolutionary technology'' from first principles, but to reduce strategic surprise and support prioritisation under uncertainty.
+Forecasts can highlight where acceleration is coherent across multiple weak signals, where unusual topic convergence appears, where new actors gain influence, or where civilian research trajectories may become defence-relevant.
+Used this way, monitoring acts as an early-warning and triage layer for analysts.
+
+Bibliometric signals are endogenous to publication ecosystems and may conflate visibility with real operational value.
+A highly cited topic is not necessarily deployable, and a low-visibility topic may still become decisive in practice.
+For this reason, model outputs should be interpreted as ranked hypotheses to investigate, not standalone procurement recommendations.
+Robust decision support requires combining these forecasts with exogenous evidence such as technology readiness level (TRL), experimental benchmarks, industrial feasibility, integration constraints, and structured expert assessment.
+
+\subsubsection{Information-theoretic formalisation.}
+The framework on which our study rely on can be stated rigorously in Shannon terms.
+Let $Y_{t+\Delta}$ denote a well-defined future technological state (e.g., topic activity, citation mass, cluster intensity) and $X_{\leq t}$ the observable history up to time $t$.
+The world induces an unknown joint distribution $p(y_{t+\Delta}, x_{\leq t})$.
+Before conditioning on history, intrinsic uncertainty is measured by source entropy $H(Y_{t+\Delta})$.
+
+A forecasting model learns a distribution $q_{\theta}(y_{t+\Delta}\mid x_{\leq t})$ by minimising empirical negative log-likelihood (cross-entropy):
+\[
+\mathbb{E}_{p}\!\left[-\log q_{\theta}(Y_{t+\Delta}\mid X_{\leq t})\right]
+= H_{p}(Y_{t+\Delta}\mid X_{\leq t})
++ \mathbb{E}_{p(x_{\leq t})}\!\left[
+\mathrm{KL}\!\left(p(\cdot\mid x_{\leq t}) \,\|\, q_{\theta}(\cdot\mid x_{\leq t})\right)\right].
+\]
+When the model is well specified, the KL term decreases, so training approaches conditional entropy $H(Y_{t+\Delta}\mid X_{\leq t})$. Hence, the gain from monitoring is the entropy drop
+\[
+I(X_{\leq t};Y_{t+\Delta})
+= H(Y_{t+\Delta}) - H(Y_{t+\Delta}\mid X_{\leq t}),
+\]
+which is the number of predictable bits of the future encoded in the past.
+
+This view also gives useful bounds. First, empirical cross-entropy is an upper bound on conditional entropy:
+\[
+H(Y_{t+\Delta}\mid X_{\leq t})
+\leq
+\mathbb{E}_{p}\!\left[-\log q_{\theta}(Y_{t+\Delta}\mid X_{\leq t})\right].
+\]
+Second, there is an irreducible floor because $X_{\leq t}$ is incomplete:
+\[
+H(Y_{t+\Delta}\mid X_{\leq t})
+\geq
+H(Y_{t+\Delta}\mid S^{\mathrm{full}}_{t}),
+\]
+where $S^{\mathrm{full}}_{t}$ denotes the full physical and institutional state (engineering bottlenecks, tacit know-how, procurement constraints, geopolitical decisions, etc).
+\newline
+
+In this perspective, the objective is to reduce uncertainty by extracting informative signals that reduce the conditional entropy of future states. This objective is based on two working assumptions:
+\begin{itemize}
+  \item The purpose of technology monitoring is not to estimate the intrinsic scientific value or technical validity of a technology \emph{a priori}.
+  However, once early signs of a shift appear in the scientific ecosystem, subsequent adoption often follows sociological inertia (attention dynamics, institutional momentum, and network effects). Therefore, technology monitoring is intrisincally about studying science evolution \emph{a posteriori} from a sociological point of view. This distinction is essential and should not be conflated (e.g., ``Are quantum technologies likely to be functional?'' versus ``Are quantum technologies likely to be adopted?'').
+  \item Therefore, reducing conditional entropy with carefully selected sociological signals can improve near-term detection of likely technology adoption trajectories.
+\end{itemize}
+
+In short, the forecasting objective is to estimate how predictable the scientific production system is and, under our assumptions, to translate that predictability into likely future operationalisation trajectories.
+
+
+\section{Methodology}
+Our methodology unfolds in four stages.
+We first harvest an approved slice of the OpenAlex corpus based on domain-curated topics,
+we then extract a curated keyword vocabulary with analyst guidance,
+we construct temporal co-occurrence tensors that surface emerging signals,
+and we forecast keyword momentum with a graph model to highlight near-term surges.
+In what follows, we present each of those stages in more detail.
+
+\subsection{Stage 1: data collection and preprocessing}
+To conduct this study, we use the OpenAlex dataset, an open source dataset that gather scientific articles from various topics.
+OpenAlex aggregates arXiv, Crossref, PubMed, and institutional repositories into a unified corpus.
+Compared to querying arXiv alone, OpenAlex provides broader coverage across publication types and disciplines, richer metadata (concept taxonomy, citations, affiliations), and a stable API for large-scale reproducible harvesting.
+We now separate topic roles into two stages: \textit{approval} topics and \textit{scan} topics.
+Approval topics define the initial corpus from which papers are selected and keywords are extracted (see stage \ref{keywordextraction}).
+Scan topics define a second-pass corpus in which those extracted keywords are searched.
+This scan set is configured independently and may overlap with, differ from, or exclude approved topics.
+Table~\ref{tab:topics} reports these stage flags for the curated topic set.
+We chose this configuration to quantify how strongly cybersecurity keywords extracted from ``Network Security and Intrusion Detection'' and ``Cryptography and Data Security'' appear in the space-oriented literature,
+specifically ``Satellite Communication Systems'' and ``GNSS positioning and interference''.
+During the scan stage, when a paper from the ``to be scanned'' topics contains at least one keyword extracted from the approval corpus (see stage 2 \ref{keywordextraction}), this paper is added to an initially empty corpus. By construction, this final corpus captures abstracts at the intersection of cybersecurity and space. We rely on this final corpus to conduct our study.
+
+After this filtering step, we run a second keyword extraction on the abstracts in the ``cyberspace'' corpus to obtain the final keyword vocabulary used in the subsequent analysis.
+\begin{table}[H]
+\centering
+\caption{OpenAlex topic clusters with stage flags from \texttt{refined\_topics.csv}. A cross (\(\times\)) marks selected topics.}
+\label{tab:topics}
+\begin{tabularx}{\textwidth}{@{}p{0.28\textwidth}X>{\centering\arraybackslash}p{0.11\textwidth}>{\centering\arraybackslash}p{0.13\textwidth}@{}}
+\toprule
+\textbf{Topic} & \textbf{Focus} & \textbf{Approved} & \textbf{To be scanned} \\
+\midrule
+Satellite Communication Systems & Research, challenges, and advancements in satellite communication networks and systems. &  & \(\times\) \\
+\midrule
+Network Security and Intrusion Detection & Development and application of techniques for identifying and mitigating network intrusions. & \(\times\) &  \\
+\midrule
+Cryptography and Data Security & Advanced cryptographic schemes including homomorphic and lattice-based encryption with privacy-preserving computation. & \(\times\) &  \\
+\midrule
+GNSS positioning and interference & Advances in global navigation satellite systems, from precise positioning to interference mitigation. &  & \(\times\) \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+We then proceed with a targeted crawl of OpenAlex using the approved topic clusters.
+Requests are throttled and parallelised to respect API limits while covering the four last decades of publications from January 1987 up to October 2025.
+Returned records undergo a sequence of quality checks: language filtering, deduplication across preprint and journal versions, and removal of out-of-topic articles that skew bibliometric signals.
+Monthly counts are then stabilised with spike-redistribution, which prevents single artificial surges from dominating the trend (see \ref{redistribution}).
+We also apply tail-correction heuristics that identify artificial declines caused by publication delays and adjust them to avoid negative drift.
+The raw topic-based OpenAlex crawl yields 1,232,438 records. After language and content filtering, deduplication, and metadata cleaning, stage~1 produces a harmonised corpus of 776,946 papers, of which 776,075 contain abstracts. We then apply a second curation pass focused on the scan topics: among 43,323 candidate papers, we retain only those containing at least one keyword extracted from the approval corpus, which yields the final cyberspace corpus of 42,425 papers used in the remainder of the study. Each retained document carries its normalised IDs, publication date, citation count, referenced works, and abstract.
+
+\subsection{Stage 2: extracting keywords}
+\label{keywordextraction}
+With abstracts in hand, we extract a meaningful set of keywords from each document. We use KeyBERT with SPECTER embeddings to rank candidate bigrams and trigrams by semantic relevance. We exclude unigrams because they are often too generic, while still allowing specific single-word terms to be reintroduced during downstream refinement. SPECTER, which is trained on scientific citation data, helps capture the scholarly context of both abstracts and candidate keywords. Literal matching is enforced so that every selected phrase appears verbatim in the text, eliminating hallucinated terms while keeping morphological variants. After deduplication via Jaccard filtering and stemming-aware normalisation, we produce an exhaustive list of cleaned keywords related to cybersecurity in space. 
+Analyst curation enters at three points:
+\begin{itemize}
+\item a guardrail list of stop words to suppress boilerplate phrases (e.g., \textit{"paper proposes"},\textit{"http"},\textit{"ieee"})
+\item a complement of forced-in keywords that one wishes to appear and might have been left out during extraction process, for instance niche keywords.
+\item a manual canonicalization step can be applied to merge semantically equivalent keywords into a single canonical term (e.g., \textit{ntn} and \textit{non-terrestrial networks}), although this step requires caution, as discussed in Section~\ref{subsec:canonicalisation_bias}.
+\end{itemize}
+We apply this procedure to a random sample of 15k abstracts drawn from this refined corpus of 42,425 papers, and successfully extract 191k keywords.
+For the next step, we choose to cap our final list to the top $500$ most occurring keywords along with a set of $28$ enforced keywords to maintain a reasonable graph size.
+
+\subsection{Stage 3: constructing graphs}
+
+The third step transforms keyword statistics into temporal graphs that express how technologies co-evolve.
+To focus on the space domain and avoid biases towards terrestrial cybersecurity topics, we decided to narrow the study by looking at abstracts only coming from the topics "Satellite Communication Systems" and "GNSS positioning and interference".
+For every month, we compute adjacency matrices of the graphs where nodes represent the cleaned keywords and weighted edges summaries joint mentions (co-occurrences) in the abstracts (see Figure \ref{fig:procedure}).
+
+\begin{figure}[H]
+    \centering
+    \makebox[\textwidth][c]{%
+        \includegraphics[width=1.3\textwidth]{keyword_graph_template.pdf}%
+    }
+    \caption{Schema of our core methodology procedure}
+\label{fig:procedure}
+\end{figure}
+
+\subsection{Stage 4: forecasting with graph neural networks}
+
+In the final stage we forecast keyword momentum with a graph model that looks at three monthly signals for each keyword: how often it appears, how strongly it co-occurs with others, and how many citations those papers collect.
+The model shares information along the co-occurrence links and projects scores 24 months ahead.
+Figure~\ref{fig:gtan_architecture} shows our GTAN base architecture.
+In section \ref{forecasting}, we expand on this forecasting challenge and further present additional variants to test how much the graph structure can be leveraged to enhance prediction capabilities.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.9\linewidth]{GTAN_architecture.pdf}
+    \caption{Graph Transformer Attention Network (GTAN) architecture used for forecasting emerging keyword activity.}
+    \label{fig:gtan_architecture}
+\end{figure}
+
+\section{Data processing}
+
+Throughout this section, \emph{in-corpus} means that computations are restricted to the papers retained in our final study corpus. In particular, an in-corpus citation event is counted only when a paper in the corpus cites another paper that is also in the corpus and references to papers outside the corpus are ignored.
+\newline
+We recall that the objective is to rank keywords by their future socio-technical relevance. When time and analytical attention are limited, such rankings are useful for prioritising the technologies most likely to diffuse and matter strategically. We therefore process the data in a way that preserves genuine keyword-level signals, especially those carried by the structure of the graph.
+
+\subsection{Feature Construction}
+In the following, we present how the features defining the emergence score are constructed.
+\subsubsection{Citations}
+
+Let \(\mathcal{P}_t\) be papers published at month \(t\), \(K(p)\) the keywords detected in paper \(p\), and \(R(p)\) the set of works referenced by \(p\).
+We distinguish two OpenAlex fields:
+\begin{itemize}
+    \item \texttt{cited\_by\_count}(p): total citations received by \(p\) at extraction time (snapshot total).
+    \item \texttt{referenced\_works}(p): bibliography of \(p\), i.e., outgoing references from \(p\).
+\end{itemize}
+The first can leak future information; the second is time-safe because it is known when \(p\) is published.
+
+A naive signal prone to data leakage is:
+\[
+x^{\mathrm{snap}}_{c,t}
+=
+\sum_{p \in \mathcal{P}_t}
+\mathbf{1}[c \in K(p)] \,\mathrm{cited\_by\_count}(p),
+\]
+which is potentially leaky since \(\mathrm{cited\_by\_count}(p)\) contains future information available at extraction time, which contaminates the training process.
+
+To avoid this, we construct a causal monthly citation flow from \texttt{referenced\_works}, reflecting how much concept \(c\) at time \(t\) is trendy among the in-corpus references cited by papers publish at time \(t\):
+\[
+x^{\mathrm{flow}}_{c,t}
+=
+\sum_{q \in \mathcal{P}_t}
+\sum_{r \in R(q)}
+\mathbf{1}[m(r)\le t]\;\omega_{r,c},
+\]
+where \(m(r)\) is publication month of \(r\), and \(\omega_{r,c}\) is keyword contribution.
+More precisely, in \texttt{per\_doc} mode, each referenced paper contributes once to concept \(c\) if \(c\) appears in that paper (\(\mathbf{1}[c\in K(r)]\) ).
+In \texttt{per\_token} mode, the contribution is multiplied by the number of occurrences of \(c\) in the referenced paper.
+We use \texttt{per\_doc} in this study to avoid mechanically amplifying citation values for verbose papers and to reduce explosive growth in cumulative citation trajectories.
+
+Using \texttt{causal\_cumulative} resolves temporal leakage, but the citation channel remains an \emph{attention} signal, not a perfect concept-success signal.
+In particular, papers with long bibliographies can inflate raw citation flow.
+For relative concept popularity, a better alternative is fractional citation flow:
+\[
+x^{\mathrm{flow,frac}}_{c,t}
+=
+\sum_{p:\,m(p)=t}
+\sum_{r\in R(p)}
+\frac{1}{|R(p)|}\,\mathbf{1}[c\in K(r)].
+\]
+This removes the ``long bibliography gives more weight'' effect.
+An optional refinement is to split contribution across all keywords of the referenced paper:
+\[
+x^{\mathrm{flow,frac\_split}}_{c,t}
+=
+\sum_{p:\,m(p)=t}
+\sum_{r\in R(p)}
+\frac{1}{|R(p)|}\,\frac{1}{|K(r)|}\,\mathbf{1}[c\in K(r)],
+\]
+which prevents one referenced paper with many keywords from over-crediting all of them.
+
+The cumulative as-of signal is:
+\[
+x^{\mathrm{cum}}_{c,t}
+=
+\sum_{\tau\le t} x^{\mathrm{flow}}_{c,\tau}.
+\]
+In this study we use a causal cumulative citation channel (\texttt{citation\_source = causal\_cumulative}) and compare raw and fractional variants.
+
+\subsubsection{Occurence and co-occurence}
+Occurrence and co-occurrence features are built month-wise. For concept \(c\) and month \(t\):
+\[
+\mathrm{occurrence}(c,t)=\text{count of concept }c\text{ in month }t,
+\]
+with token-mode or document-mode counting depending on configuration, and
+\[
+\mathrm{coocc}(c,t)=\sum_{j\neq c}\text{co-occurrence count of }(c,j)\text{ in month }t.
+\]
+
+
+\subsection{Data smoothing}
+\subsubsection{Publication date redistribution}
+\label{redistribution}
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.98\linewidth,trim=0 0 0 0.82cm,clip]{../data/usecase_cyberspace/01_extract/outputs/counts_stage1_purge.pdf}
+    \caption{Monthly paper counts after initial purge, before redistribution and downsampling.}
+    \label{fig:counts_stage1_purge}
+\end{figure}
+
+\noindent Figure~\ref{fig:counts_stage1_purge} shows strong monthly spikes in the raw publication timeline.
+Part of these spikes is artificial and comes from metadata practices, especially placeholder dates concentrated in January.
+To reduce this artifact, we apply a redistribution step that moves part of January-assigned papers to neighboring months within a \(\pm 6\)-month window.
+This improves temporal realism and reduces over-concentration at year boundaries.
+We then apply a month-wise downsampling step: each paper is kept with a probability depending on its (year, month), so over-represented months are attenuated while preserving the global annual dynamics. These processes suggest that the meaningful temporal resolution is effectively yearly rather than monthly. However, for consistency, we continue to express time in months. Overall, this preprocessing stabilises the monthly timeline of the already refined 42,425-paper corpus rather than defining that corpus itself.
+
+\subsubsection{Tail-correction for ingestion lag}
+
+Recent months can be artificially low because late-indexed papers are not fully ingested yet. To reduce this ingestion-lag bias, we apply a multiplicative tail correction to monthly series.
+For each feature (and for average co-occurrence intensity), we compute a monthly baseline \(y_t\), detect a post-peak sustained decline, fit a robust log-linear trend on the pre-break window, and extrapolate the expected tail.
+We then define a monthly correction factor:
+\[
+\gamma_t=\frac{\widehat{y}_t}{y_t},
+\]
+where \(\widehat{y}_t\) is the extrapolated reference level. In practice, \(\gamma_t\) is smoothed, clipped to a safe range, and constrained to be \(1\) before the detected break month. Corrected inputs are:
+\[
+x^{\text{corr}}_{c,t,f}=\gamma_{t,f}\,x_{c,t,f},
+\]
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.98\linewidth]{data/usecase_cyberspace/04_build_graph/outputs/plots/inputs_seen/heatmaps/EM_raw_Eps1e-08_F8_W12__inputs_seen_per_feature_former_dashed.pdf}
+    \caption{Uncorrected and tail-adjusted trajectories for the three indicators \(x_{\mathrm{cum\_frac\_split}}\), \texttt{oc\_freq}, and \texttt{edge\_weight}. For each indicator, solid curves show the uncorrected input and dashed curves show a trend-preserving tail-adjusted continuation meant to approximate the trajectory in the absence of ingestion lag.}
+    \label{fig:tail_correction_overlay}
+\end{figure}
+
+Although tail correction improves interpretability and training stability, it is not strictly necessary for our main objective, which is to rank keywords relative to one another by future popularity. The aim is therefore not to reconstruct the exact missing volume, but to approximate how the aggregate data would have evolved in the absence of ingestion lag.
+
+\subsection{Choosing the suitable citation feature from data}
+Figure~\ref{fig:citation_flow_and_cumulative} indicates that \(x_{\mathrm{cum,frac\_split}}\) provides a good trade-off between sensible citation dynamics and controlled scale. we therefore retain it as citation signal.
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.98\linewidth]{\cyberplotsdir/EM_raw_Eps1e-08_F8_W12__citation_flow_and_cumulative_overall.pdf}
+    \caption{Overall comparison of \(x_{\mathrm{flow}}\), \(x_{\mathrm{flow,frac}}\), \(x_{\mathrm{flow,frac\_split}}\) and their cumulative counterparts.}
+    \label{fig:citation_flow_and_cumulative}
+\end{figure}
+
+\subsection{Data visualisation}
+
+Visualising the data is essential to ensure data processing pipeline has performed as expected, and to explore which model could potentially be used to conduct an appropriate analysis.
+\newline
+For each concept \(c\) and month \(t\), the input vector is
+\[
+X_{c,t}=\big[x^{\mathrm{cum,frac\_split}}_{c,t},\ \texttt{oc\_freq}_{c,t},\ \texttt{edge\_weight}_{c,t}\big].
+\]
+For visualisation and target aggregation we use:
+\[
+A^{FW}_{c,t}=\sum_{i=1}^{3} FW_i\,X_{c,t,i},
+\]
+with \(FW=[0.3831,\,0.5189,\,0.0980]\) to balance the three feature magnitudes on the 2005--2025 period.
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.98\linewidth]{\cyberplotsdir/EM_raw_Eps1e-08_F8_W12__aggregate_raw_balanced_fw_2005_2025.pdf}
+  \caption{Balanced aggregate indicator trajectories over time (2005--2025), using refit weights \(FW=[0.3831,\,0.5189,\,0.0980]\) for \((x_{\mathrm{cum,frac\_split}},\ \texttt{oc\_freq},\ \texttt{edge\_weight})\).}
+  \label{fig:aggregate_raw_balanced}
+\end{figure}
+
+Figure~\ref{fig:aggregate_raw_balanced} first shows the aggregate evolution of the indicators over time, and Figure~\ref{fig:raw_heatmaps} then details the heatmaps of the three input signals plus the features aggregate view.
+The value corresponding to the colors is logarithmic (log(1+value)), and the color range is specific to each heatmap (although using the same palet).
+\newline
+A first observation is that almost all keywords are approximately silent up to year 2002, relative to the exponential increase that happens after this silent area.
+A local spike in 2003/2004 is most likely due to an artificial spike of dump that occurred this year and was mishandled during data processing.
+For those reasons, we decided to train our forecasting models using the data from 2005 onward, mainly to leverage only the relevant substantial signal and not mislead models into focusing on silent years.
+
+\begin{figure}[H]
+    \centering
+    \begin{subfigure}[t]{0.48\textwidth}
+      \centering
+      \includegraphics[width=\linewidth]{\cyberplotsdir/EM_raw_Eps1e-08_F8_W12__heatmap_raw_xcum_frac_split_ordered_by_fw_aggregate_2025-10-01.pdf}
+      \caption{Citation signal (\texttt{xcum\_frac\_split}, ordered by FW aggregate).}
+      \label{fig:raw_heatmap_cited}
+    \end{subfigure}
+    \hfill
+    \begin{subfigure}[t]{0.48\textwidth}
+        \centering
+        \includegraphics[width=\linewidth]{\cyberplotsdir/EM_raw_Eps1e-08_F8_W12__heatmap_raw_oc_freq_ordered_by_fw_aggregate_2025-10-01.pdf}
+        \caption{Occurrences (\texttt{oc\_freq}, ordered by FW aggregate).}
+        \label{fig:raw_heatmap_ocfreq}
+    \end{subfigure}
+
+    \vspace{0.8em}
+
+    \begin{subfigure}[t]{0.48\textwidth}
+        \centering
+        \includegraphics[width=\linewidth]{\cyberplotsdir/EM_raw_Eps1e-08_F8_W12__heatmap_raw_edge_weight_ordered_by_fw_aggregate_2025-10-01.pdf}
+        \caption{Co-occurrence mass (\texttt{edge\_weight}, ordered by FW aggregate).}
+        \label{fig:raw_heatmap_edge}
+    \end{subfigure}
+    \hfill
+    \begin{subfigure}[t]{0.48\textwidth}
+        \centering
+        \includegraphics[width=\linewidth]{\cyberplotsdir/EM_raw_Eps1e-08_F8_W12__heatmap_fw_aggregate_balanced_fw_ordered_by_fw_aggregate_2025-10-01.pdf}
+        \caption{FW aggregate heatmap (balanced FW, ordering reference).}
+        \label{fig:raw_heatmap_fw}
+    \end{subfigure}
+    \caption{Global heatmaps, all ordered by the FW aggregate ranking at 2025-10-01.}
+    \label{fig:raw_heatmaps}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \begin{subfigure}[t]{0.48\textwidth}
+      \centering
+      \includegraphics[width=\linewidth]{\cyberplotsdir/EM_raw_Eps1e-08_F8_W12__topk_heatmap_xcum_frac_split_ordered_by_fw_aggregate_2025-10-01.pdf}
+      \caption{Citation signal (\texttt{xcum\_frac\_split}, top20 ordered by FW aggregate).}
+      \label{fig:raw_heatmap_cited_top20}
+    \end{subfigure}
+    \hfill
+    \begin{subfigure}[t]{0.48\textwidth}
+        \centering
+        \includegraphics[width=\linewidth]{\cyberplotsdir/EM_raw_Eps1e-08_F8_W12__topk_heatmap_oc_freq_ordered_by_fw_aggregate_2025-10-01.pdf}
+        \caption{Occurrences (\texttt{oc\_freq}, top20 ordered by FW aggregate).}
+        \label{fig:raw_heatmap_ocfreq_top20}
+    \end{subfigure}
+
+    \vspace{0.8em}
+
+    \begin{subfigure}[t]{0.48\textwidth}
+        \centering
+        \includegraphics[width=\linewidth]{\cyberplotsdir/EM_raw_Eps1e-08_F8_W12__topk_heatmap_edge_weight_ordered_by_fw_aggregate_2025-10-01.pdf}
+        \caption{Co-occurrence mass (\texttt{edge\_weight}, top20 ordered by FW aggregate).}
+        \label{fig:raw_heatmap_edge_top20}
+    \end{subfigure}
+    \hfill
+    \begin{subfigure}[t]{0.48\textwidth}
+        \centering
+        \includegraphics[width=\linewidth]{\cyberplotsdir/EM_raw_Eps1e-08_F8_W12__topk_heatmap_fw_aggregate_ordered_by_fw_aggregate_2025-10-01.pdf}
+        \caption{FW aggregate heatmap (top20 ordered by FW aggregate).}
+        \label{fig:raw_heatmap_fw_top20}
+    \end{subfigure}
+    \caption{Top20 heatmaps from 2020-01 onward, all ordered by the FW aggregate ranking at 2025-10-01.}
+    \label{fig:raw_heatmaps_top20}
+\end{figure}
+
+A bubble-plot view in Figure~\ref{fig:bubble_recent_growth_fw} provides a complementary picture of recent dynamics by showing which concepts combine balanced-aggregate scale with recent growth in October 2025. This representation makes it easier to identify both dominant concepts and smaller themes with strong recent momentum. For instance, ``ntn'' and ``optimization problem'' appear as small, distant bubbles, yet their red coloring suggests strong recent momentum that may persist.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.88\linewidth]{cyberplots/bubble/EM_raw_Eps1e-8_F24_W12__bubble_growth_fw_aggregate_2025-10.pdf}
+    \caption{Bubble plot of recent growth in the balanced aggregate indicator (October 2025).}
+    \label{fig:bubble_recent_growth_fw}
+\end{figure}
+
+\subsubsection{Canonicalisation bias and absolute scores}
+\label{subsec:canonicalisation_bias}
+Keyword canonicalisation is useful to remove lexical noise, but it introduces a structural bias when emergence is ranked with absolute scores, or even relative scores.
+If two variants \(a\) and \(b\) are merged into one canonical label \(c^\star\), then the resulting score is mechanically additive:
+\[
+E(c^\star,t)\approx E(a,t)+E(b,t),
+\]
+so manually curated families can be favored versus unknown keywords that remain unmerged.
+In other words, aggressive semantic canonisation injects a priori ontology into what should remain a data-driven ranking.
+
+Relative-growth targets reduce this scale effect, such as \[
+g^{\tau}_{c,t,\Delta}
+=
+\frac{E(c,t)-E(c,t-\Delta)}{\max\!\big(E(c,t-\Delta),\tau\big)},
+\]
+or a log-ratio with additive floor
+\[
+g^{\log}_{c,t,\Delta}
+=
+\log\!\frac{E(c,t)+\alpha}{E(c,t-\Delta)+\alpha}.
+\]
+However, the limitation remains even with relative targets since broad semantic fusion smooths fine-grained emergence.
+If \(A\) is stable (\(100\to100\)) and \(B\) is emerging (\(1\to5\)), then \(B\) alone has strong growth, while the merged signal \((A+B)\) becomes \(101\to105\), i.e., only about \(+4\%\).
+Hence, local bursts can be diluted by large stable components, and asynchronous variants can cancel each other in the aggregate trajectory.
+For this reason, canonicalisation should stay conservative and focus on lexical normalisation rather than broad semantic collapsing.
+
+\section{Forecasting with graph neural networks}
+\label{forecasting}
+Meaningful forecasting is achieved when both the signal to forecast and the model architecture has been well-defined and aligned within the context of the study. In the following, we present how we proceeded regarding those two independent choices.
+\subsection{The target emergence score}
+Defining technological emergence is inherently challenging.
+The definition should implicitly aim for a paradigm that is broad enough to cover different emergence flavors comparable across different studies, but still be flexible to adapt well to each specific studies without too much conceptual and technical changes.
+Additionally, the definition should remain intuitive and operationalisable.\\
+To meet these requirements, we define the target emergence score as the following weighted dot product:
+\[
+E(\text{concept}, t) = \sum_{i} w_i \, f_i(\text{concept}, t),
+\]
+where $w_i$ are analyst-specified normalised weights and $f_i$ are the monthly indicators. This simple definition allows us to meaningfully and easily adapt each indicator importance across different studies. In this study the indicators are:
+\begin{itemize}
+    \item occurrences of a concept (node weight),
+    \item total co-occurrences of a concept (sum of adjacent edge weights),
+    \item total citations of the papers that mentioned the concept.
+\end{itemize} 
+
+\subsection{Target parameterisation: \texttt{level} vs \texttt{residual}}
+For a forecast horizon \(\Delta\), two target formulations are used in practice:
+\[
+y^{\text{level}}_{c,t}=E(c,t+\Delta),
+\qquad
+y^{\text{residual}}_{c,t}=E(c,t+\Delta)-E(c,t).
+\]
+They are bijectively linked through
+\[
+\widehat{E}(c,t+\Delta)=E(c,t)+\widehat{y}^{\text{residual}}_{c,t},
+\]
+but they do not behave the same during learning with finite data and finite-capacity models. \texttt{level} keeps the full scale and long-run trend of \(E\), while \texttt{residual} recenters the target on expected change.
+
+In this study we choose \texttt{TARGET\_MODE = residual}.
+The main reason is methodological: our emergence score includes a cumulative citation component (\(x_{\text{cum\_frac\_split}}\)), so level targets contain strong trend and scale effects that can make drift-like extrapolation artificially dominant.
+Using residual targets reduces this bias, yields a stricter comparison between graph and non-graph models, and focuses the task on the quantity that matters more for monitoring decisions: expected gain or loss over the next \(\Delta\) months.
+
+\subsection{The trade-off between relative and raw evolution}
+Regarding our definition of emergence, we must clarify which signal the model should prioritize. Intuitively, detecting emerging technologies means identifying whether currently weak nodes will become strong in the future rather than remain inactive. This naturally suggests a classification framework, however, we deliberately avoid introducing arbitrary thresholds in order to remain decision-agnostic. Therefore, we should rather define an emergence score reflecting a relative gain, as already suggested in \ref{subsec:canonicalisation_bias}. We explored this relative-growth formulation early in the study, but the first raw monthly ratio targets were poorly conditioned for stable training and reliable generalization. The issue is not that relative growth is intrinsically harder to predict than raw gain. Rather, a lag-12 ratio is not a smoothing operator: it compares two single monthly endpoints, so remaining month-level noise and small denominators are amplified rather than averaged out. Figure~\ref{fig:relative_growth_heatmaps} shows the corresponding lag-12 relative-growth heatmaps, computed as \((E(c,t)-E(c,t-12))/(E(c,t-12)+\tau)\), where \(\tau\) is chosen per panel as the \(25^{\text{th}}\) percentile of positive lagged values. This additive stabilizer removes the systematic activation spikes seen with a raw relative denominator, yet the unsmoothed monthly target still remains visibly noisier than the raw-score formulation.
+
+Raw gain and relative gain are nevertheless closely connected mathematically. Let \(S(c,t)\) denote the base signal at time \(t\), either the raw emergence score \(E(c,t)\) or a smoothed variant such as \(\tilde{E}(c,t)\). Over a forecast horizon \(\Delta\), define the additive future gain
+\[
+g(c,t)=S(c,t+\Delta)-S(c,t),
+\]
+and the corresponding relative gain
+\[
+r(c,t)=\frac{S(c,t+\Delta)-S(c,t)}{S(c,t)+\tau}
+=\frac{g(c,t)}{S(c,t)+\tau}.
+\]
+Hence
+\[
+g(c,t)=(S(c,t)+\tau)\,r(c,t).
+\]
+So both targets describe the same future change, but in different coordinates: raw gain is an additive view, whereas relative gain is the same change normalized by current scale.
+
+This equivalence does not mean that both training objectives behave the same. Because our training loss is RMSE, optimizing the relative target is equivalent to optimizing raw gain with a time- and concept-specific weight:
+\[
+\left(r-\hat r\right)^2
+=
+\frac{\left(g-\hat g\right)^2}{(S+\tau)^2},
+\qquad
+\hat g=(S+\tau)\hat r.
+\]
+Relative targets therefore upweight low-baseline concepts and downweight already dominant ones, while raw-gain training is dominated by large absolute misses on high-mass concepts. In this sense, the two formulations are connected vessels: they encode the same future evolution, but they redistribute learning emphasis very differently. This is precisely why the relative formulation is appealing for niche-emergence monitoring, and also why denominator instability matters so much when the underlying monthly series are sparse.
+\begin{figure}[H]
+    \centering
+    \begin{subfigure}[t]{0.49\linewidth}
+      \centering
+      \includegraphics[width=\linewidth]{\cyberrelativeplotsdir/EM_raw_Eps1e-08_F8_W12__heatmap_relative_lag12_xcum_frac_split.pdf}
+      \caption{Relative growth of cumulative citation share.}
+      \label{fig:relative_growth_xcum}
+    \end{subfigure}
+    \hfill
+    \begin{subfigure}[t]{0.49\linewidth}
+      \centering
+      \includegraphics[width=\linewidth]{\cyberrelativeplotsdir/EM_raw_Eps1e-08_F8_W12__heatmap_relative_lag12_oc_freq.pdf}
+      \caption{Relative growth of occurrence frequency.}
+      \label{fig:relative_growth_ocfreq}
+    \end{subfigure}
+
+    \vspace{0.5em}
+
+    \begin{subfigure}[t]{0.49\linewidth}
+      \centering
+      \includegraphics[width=\linewidth]{\cyberrelativeplotsdir/EM_raw_Eps1e-08_F8_W12__heatmap_relative_lag12_edge_weight.pdf}
+      \caption{Relative growth of co-occurrence strength.}
+      \label{fig:relative_growth_edge}
+    \end{subfigure}
+    \hfill
+    \begin{subfigure}[t]{0.49\linewidth}
+      \centering
+      \includegraphics[width=\linewidth]{\cyberrelativeplotsdir/EM_raw_Eps1e-08_F8_W12__heatmap_relative_lag12_fw_aggregate.pdf}
+      \caption{Relative growth of the FW aggregate score.}
+      \label{fig:relative_growth_fw}
+    \end{subfigure}
+    \caption{Lag-12 relative-growth heatmaps on the updated cyberspace corpus. Values are computed as \((E(c,t)-E(c,t-12))/(E(c,t-12)+\tau)\), with \(\tau\) chosen independently for each panel as the \(25^{\text{th}}\) percentile of positive lagged values.}
+    \label{fig:relative_growth_heatmaps}
+\end{figure}
+
+To separate endpoint instability from genuine concept dynamics, we also computed a trailing-window variant. For each concept series we first form a 12-month trailing mean
+\[
+\tilde{E}(c,t)=\frac{1}{12}\sum_{k=0}^{11}E(c,t-k),
+\]
+and then the same lag-12 relative growth
+\[
+\tilde{g}(c,t)=\frac{\tilde{E}(c,t)-\tilde{E}(c,t-12)}{\tilde{E}(c,t-12)+\tau}.
+\]
+Figure~\ref{fig:relative_growth_heatmaps_smooth} shows that this additional smoothing makes the relative signal much more interpretable, especially for occurrence frequency, edge weight, and the balanced FW aggregate, while the cumulative-citation panel was already comparatively smooth. This confirms that the instability comes mainly from comparing noisy monthly endpoints rather than from the relative-growth idea itself. However, overlapping trailing windows also reduce the effective temporal independence of adjacent months, so the resulting series is smoother but less information-dense. We therefore keep raw-score prediction as the default target for the main study, and treat the smoothed relative-growth target as a robustness check rather than the central forecasting objective.
+
+\begin{figure}[htbp]
+    \centering
+    \begin{subfigure}[t]{0.49\textwidth}
+      \centering
+      \includegraphics[width=\linewidth]{\cyberrelativesmoothplotsdir/EM_raw_Eps1e-08_F8_W12__heatmap_relative_smooth_trailing12_lag12_xcum_frac_split.pdf}
+      \caption{Trailing-smoothed relative growth of cumulative citation.}
+      \label{fig:relative_growth_heatmaps_smooth_cited}
+    \end{subfigure}
+    \hfill
+    \begin{subfigure}[t]{0.49\textwidth}
+      \centering
+      \includegraphics[width=\linewidth]{\cyberrelativesmoothplotsdir/EM_raw_Eps1e-08_F8_W12__heatmap_relative_smooth_trailing12_lag12_oc_freq.pdf}
+      \caption{Trailing-smoothed relative growth of occurrence frequency.}
+      \label{fig:relative_growth_heatmaps_smooth_ocfreq}
+    \end{subfigure}
+
+    \vspace{0.6em}
+
+    \begin{subfigure}[t]{0.49\textwidth}
+      \centering
+      \includegraphics[width=\linewidth]{\cyberrelativesmoothplotsdir/EM_raw_Eps1e-08_F8_W12__heatmap_relative_smooth_trailing12_lag12_edge_weight.pdf}
+      \caption{Trailing-smoothed relative growth of co-occurrence edge weight.}
+      \label{fig:relative_growth_heatmaps_smooth_edge}
+    \end{subfigure}
+    \hfill
+    \begin{subfigure}[t]{0.49\textwidth}
+      \centering
+      \includegraphics[width=\linewidth]{\cyberrelativesmoothplotsdir/EM_raw_Eps1e-08_F8_W12__heatmap_relative_smooth_trailing12_lag12_fw_aggregate.pdf}
+      \caption{Trailing-smoothed relative growth of the balanced FW aggregate.}
+      \label{fig:relative_growth_heatmaps_smooth_fw}
+    \end{subfigure}
+    \caption{Trailing-12 smoothed lag-12 relative-growth heatmaps on the updated cyberspace corpus. Each monthly series is averaged over the previous 12 months before computing the lag-12 relative change, using the same panel-wise \(\tau\) stabilizer as in Figure~\ref{fig:relative_growth_heatmaps}.}
+    \label{fig:relative_growth_heatmaps_smooth}
+\end{figure}
+
+\subsection{GTAN base model}
+\label{gtan}
+Our GTAN base model, denoted \textbf{Graph\_base}, operates on a sequence of monthly graphs. For each month, node features are passed through a
+node MLP and a graph message-passing layer (TransformerConv) to exchange information with neighbors.
+This produces a per-node embedding at each time step using a gating mechanism. These embeddings are then fed into a temporal
+multi-head attention layer over the last TEMP\_WINDOW months. The final hidden state is mapped to a
+single scalar target per node (FW-weighted aggregate of the features). In short: \emph{graph mixing
+within each month, then temporal attention across months}.
+
+\paragraph{Mathematical view.}
+Let $X_t \in \mathbb{R}^{N \times F}$ be node features and $A_t$ the weighted adjacency at month $t$.
+The model computes:
+\[
+H_t^{\text{node}} = \mathrm{MLP}(X_t), \qquad
+H_t^{\text{graph}} = \mathrm{TransformerConv}(X_t, A_t),
+\]
+and combines them (gated if enabled). We denote by $G_t \in [0,1]^{N \times 1}$ the
+node-wise gate vector at month $t$:
+\[
+G_t = \sigma\!\left(\mathrm{MLP}_g\!\left([H_t^{\text{node}} ; H_t^{\text{graph}}]\right)\right), \qquad
+H_t = G_t \odot H_t^{\text{graph}} + (1-G_t)\odot H_t^{\text{node}}.
+\]
+Equivalently, for one node $i$:
+\[
+g_{i,t}\in[0,1], \qquad
+h_{i,t} = g_{i,t}\,h_{i,t}^{\text{graph}} + (1-g_{i,t})\,h_{i,t}^{\text{node}}.
+\]
+The \texttt{MLP\_g} weights are learnable parameters; $G_t$ itself is a data-dependent
+output of that learned function (not a free standalone parameter).
+The temporal stack $H_{t-W+1:t}$ is fed to multi-head self-attention:
+\[
+Z = \mathrm{MHA}(H_{t-W+1:t}),
+\]
+and the prediction is made from the last step:
+\[
+\hat{y}_{t+\Delta} = W_o Z_{t}^{\text{last}}.
+\]
+Here $W$ is TEMP\_WINDOW and $\Delta$ is FORECAST. Targets are the FW-weighted aggregate of features
+at $t+\Delta$ (or a residual/log-change variant depending on TARGET\_MODE).
+
+Here we specify how the temporal and spatial attention works more precisely:
+
+\paragraph{TransformerConv (graph attention).}
+At each month $t$, TransformerConv performs attention \emph{over neighbors} in the graph.
+Conceptually, for each node $i$ with neighbors $j \in \mathcal{N}(i)$:
+\[
+\alpha_{ij} = \mathrm{softmax}_j\!\left(\frac{(W_Q h_i)^\top (W_K h_j + W_E e_{ij})}{\sqrt{d_k}}\right),
+\qquad
+h_i' = \sum_{j \in \mathcal{N}(i)} \alpha_{ij}\,(W_V h_j + W_E' e_{ij}),
+\]
+where $e_{ij}$ is an optional edge attribute (e.g., co-occurrence weight).
+In short: it reweights neighbor messages via attention instead of averaging them.
+
+
+\paragraph{Temporal self-attention (discrete-time).}
+Let $H \in \mathbb{R}^{W \times N \times d}$ be the hidden sequence for one node across the last
+$W$ months (after graph mixing). For each head, queries/keys/values are linear projections
+$Q = HW_Q$, $K = HW_K$, $V = HW_V$. Attention weights are:
+\[
+\mathrm{Attn}(H) = \mathrm{softmax}\!\left(\frac{QK^\top}{\sqrt{d_k}}\right) V,
+\]
+computed across the $W$ time steps (not across nodes). This lets the model emphasize specific
+months in the window (e.g., recent spikes) when forming the prediction for $t+\Delta$.
+
+\subsection{Models compared}
+\label{modelvariants}
+Here are shortly presented the various models we tested along with a brief explanation on what motivated such a choice. Let $x_t$ be the target time serie to forecast at time $t+\Delta$ (related to some temporal graphs).
+\begin{itemize}
+  \item \textbf{Persistence.} This baseline predicts the last observed target at time $t$ : $\hat{x}_{t+\Delta}=x_t$. \emph{Motivation:} this baseline is naive but performs well when changes are small relative to noise and provide some insights on how much data are actually evolving in the dataset.
+  \item \textbf{Drift.} This baseline extrapolates the target from a recent linear slope. An effective lag
+  $k=\min(L,t)$ is used, yielding
+  $s_t = \frac{x_t - x_{t-k}}{k}$ and
+  $\hat{x}_{t+\Delta} = x_t + \Delta s_t$.
+  \emph{Motivation:} can extrapolate upward or downward trends. Drift ignores graph structure: it only uses each node's own history. A small lag is more reactive but yields a noisier slope and can overshoot,
+  a large lag is smoother and more stable but can miss recent trend changes.
+  Therefore, a higher lag is not always better: this is a bias-variance trade-off, and the best lag
+  depends on the data, forecast horizon, and evaluation metric (MAE vs RMSE).
+  \item \textbf{NoGraph :} This is the same temporal model as \textbf{Graph\_base.} but with message passing disabled (node-only
+  input). This is a node-wise temporal Transformer (time-series model) completely ignoring the graph structure, not a graph model.
+  \emph{Motivation:} learns each node’s temporal dynamics without adding potentially noisy
+  neighbor signal.
+  \item \textbf{Graph\_base :} This is the original GTAN \ref{gtan} with message passing on the co-occurrence graph at time $t$
+  (TransformerConv) + temporal attention over the last TEMP\_WINDOW steps. \emph{Motivation:} can exploit cross-topic influence patterns when the graph signal is predictive.
+  \item \textbf{Graph\_mix :} Same as \textbf{Graph\_base}, but with two heads (node-only and graph) mixed by a
+  learned gate $\alpha$. \emph{Motivation:} lets the model downweight graph signal when it hurts,
+  approaching \textbf{NoGraph} behavior on stable nodes. In \textbf{Graph\_base}, the gate $G_t$ mixes node and graph embeddings \emph{before} temporal
+  attention (feature-level mixing). In \textbf{Graph\_mix}, the model builds two separate temporal
+  paths (node-only and graph-only) and mixes their \emph{predictions} after temporal attention using
+  $\alpha$. These are not equivalent: \textbf{Graph\_base} changes the sequence fed into attention, whereas
+  graph\_mix leaves the temporal dynamics separate and blends only the final outputs.
+  \item \textbf{Graph\_multi :} This graph model that feeds the GNN multiple graph snapshots from the past
+  (e.g., $t$, $t-6$, $t-12$) as separate edge channels, plus optional auxiliary losses at shorter
+  horizons (6/12 months). \emph{Motivation:} lets the model learn \emph{which lagged graph state}
+  best predicts a 24-month target (e.g., maybe $t-12$ is more informative than $t$), and stabilizes
+  training by also fitting nearer-term targets.
+  \item \textbf{Graph\_multi\_mix :} This is \textbf{Graph\_multi} plus the mixing head to allow fall back toward node-only when graph signal is weak. \emph{Motivation:} uses lag-aware graph inputs when they help, but can automatically down-weight them on stable/noisy nodes to avoid hurting performance.
+\end{itemize}
+
+\subsection{Classification vs regression for prediction}
+There is a natural tension between framing emergence score prediction as a \emph{classification} problem (e.g., ``emerging'' vs ``not emerging'' or top-$K$ vs rest) and as a \emph{regression} problem that predicts a continuous emergence score $E(\text{concept}, t)$.
+Classification has the appeal of decision-ready outputs and makes the usual precision-recall trade-off explicit.
+However, it requires choosing a threshold (or a fixed top-$K$ cutoff) for what counts as ``emerging''.
+That choice is often ad hoc and depends on the domain, the forecast horizon, and the analyst's risk tolerance, which makes results harder to compare across time windows and use cases.
+By contrast, regression preserves the continuous nature of the target and avoids forcing a hard cutoff.
+It also keeps the training objective aligned with the score we actually want to estimate.
+For this study, we therefore treat forecasting as a regression task on $E(\text{concept}, t)$ and report regression metrics.
+\subsection{Regression metrics and loss function}
+For any given evaluation split (validation or test), we report both MAE and RMSE on the same valid evaluation mask. For predictions $\hat{y}_{c,t}$ and targets $y_{c,t}$ over
+the valid index set $\Omega$, metrics are:
+\[
+\mathrm{MAE}=\frac{1}{|\Omega|}\sum_{(c,t)\in\Omega}\left|\hat{y}_{c,t}-y_{c,t}\right|,
+\qquad
+\mathrm{RMSE}=\sqrt{\frac{1}{|\Omega|}\sum_{(c,t)\in\Omega}\left(\hat{y}_{c,t}-y_{c,t}\right)^2}.
+\]
+RMSE is more sensitive to large misses, assigning higher weight to large per-node errors. This is desirable when the main risk is missing sharp surges in concept emergence, while MAE captures typical absolute error more robustly.
+This way, we also use RMSE as the training loss and the main evaluation metric for all models. 
+\newline
+
+In the reported runs, the training objective is \texttt{LOSS\_FN=rmse} (with \texttt{LOSS\_SPACE=raw}),
+and model selection/early stopping follows the same criterion for consistency. MAE is reported as a
+complementary diagnostic to check whether gains are broad-based or mainly driven by reducing a subset
+of large errors. This is particularly useful in drift-corrected diagnostics, where RMSE can be much
+larger than MAE, indicating heavy-tailed residuals and occasional spike-like misses.
+
+
+
+
+\section{Training protocol and split}
+\subsection{Split}
+Each model is trained on sliding temporal windows of length
+TEMP\_WINDOW months and predicts the target at $t+\text{FORECAST}$.
+We use a contiguous time split (no shuffling) with SPLIT\_FRACS = [0.6, 0.2, 0.2],
+so the oldest windows form the training set, the next block is validation, and the most recent
+block is test. All models and baselines are evaluated on the same split masks.
+For the current run (TEMP\_WINDOW=12, FORECAST=24), the pipeline split corresponds to
+TRAIN 2005-12-01 to 2016-08-01, VAL 2016-09-01 to 2020-03-01, TEST 2020-04-01 to 2023-10-01.
+\newline
+
+In this setup, the supervised sequence contains \(T'=250\) forecastable months and \(215\) sliding windows
+(\(129\) train, \(43\) validation, \(43\) test). On the valid node-time mask, this corresponds to
+\(55{,}563\) training targets, \(20{,}730\) validation targets, and \(21{,}394\) test targets, with
+about \(443\) active nodes per month on average. For the default compact architectures
+(\(H=32\), \(2\) heads), this is a favorable scale regime: roughly \(4.8\)k trainable parameters for
+NoGraph and \(7.8\)k--\(8.0\)k for graph variants, i.e., substantially fewer parameters than training
+supervision points. Combined with dropout (\(0.30\)), weight decay (\(10^{-4}\)), and early stopping,
+this is generally sufficient to limit severe overfitting, although it does not eliminate overfitting risk
+entirely because temporal samples are correlated rather than i.i.d.
+
+\subsection{Target normalization during training.}
+For numerical stability, targets are normalized in two steps, using only the training split:
+\[
+\tilde{y}=\phi(y), \qquad z=\frac{\tilde{y}-\mu_{\text{train}}}{\sigma_{\text{train}}},
+\]
+where $\phi(\cdot)$ is the configured loss-space transform (\texttt{raw}, \texttt{log1p}, or \texttt{asinh}), and
+$\mu_{\text{train}},\sigma_{\text{train}}$ are estimated from training targets only.
+The role of $\phi(\cdot)$ is to set the optimization space before standardization:
+\texttt{log1p} and \texttt{asinh} can compress heavy-tailed targets and reduce gradient-scale instability,
+whereas \texttt{raw} keeps the original target geometry unchanged.
+In this study we use \texttt{LOSS\_SPACE=raw} for simplicity and direct interpretability,
+so optimization, model selection, and reported errors remain aligned with the same raw-unit target scale.
+Optimization is performed on $z$, but validation/test metrics are computed after inverting the transform:
+\[
+\hat{y}=\phi^{-1}\!\left(\hat{z}\,\sigma_{\text{train}}+\mu_{\text{train}}\right).
+\]
+Therefore reported MAE/RMSE are in raw target units (not standardized units), and no information from validation/test
+is used to fit normalization parameters.
+In short, this keeps optimization numerically well-conditioned (more stable gradients and loss scale) while preserving
+interpretability and evaluation hygiene: metrics remain in raw units, and no validation/test information leaks into
+normalization.
+
+\subsection{Machine used}
+All experiments reported in this article were run on a single local machine, an \textbf{HP EliteBook 840 G6} laptop.
+Hardware/software profile: Windows 11 (10.0.26100), Intel x86\_64 CPU (4 physical cores, 8 logical threads), 31.8~GB RAM, and PyTorch 2.9.1+cpu (no CUDA accelerator).
+
+
+\section{Results}
+
+\begin{comment}
+\subsection{Learning curve}
+The learning curves indicate that the models capture some structure, but the overall learning signal remains limited.
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.92\textwidth]{../data/usecase_cyberspace/05_train_gnn/outputs/diagnostics_histories/learning_curves_all_models_from_log.pdf}
+\caption{Merged learning curves across models under \texttt{TARGET\_MODE=residual}. Blue curves show train RMSE and orange curves show validation RMSE; line style identifies the model.}
+\label{fig:learning_curves_merged}
+\end{figure}
+\end{comment}
+
+\subsection{Comparison of model variants}
+To better understand the capabilities of the graph models, we evaluated the model variants described in Section~\ref{modelvariants}. Table~\ref{tab:diagnostics_full} reports the corresponding results.
+\begin{table}[H]
+\centering
+\caption{Evaluation results under \texttt{TARGET\_MODE=residual} from the full-heatmap run (\texttt{run\_id=exp\_residual\_diag\_fullheatmap\_20260307}, 532 active keywords).}
+\label{tab:diagnostics_full}
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{lcccccc}
+\toprule
+name & mae & rmse & hidden\_channels & num\_heads & temp\_window & forecast \\
+\midrule
+graph\_base & \textbf{3.121} & 9.688 & 32 & 2 & 12 & 24 \\
+graph\_mix & 3.142 & 9.752 & 32 & 2 & 12 & 24 \\
+graph\_multi & 3.324 & 9.827 & 32 & 2 & 12 & 24 \\
+graph\_multi\_mix & 3.137 & 9.727 & 32 & 2 & 12 & 24 \\
+nograph & 3.134 & 9.871 & 32 & 2 & 12 & 24 \\
+persist & 3.501 & 11.207 & -- & -- & 12 & 24 \\
+drift (L=24) & 3.179 & \textbf{8.708} & -- & -- & 12 & 24 \\
+\bottomrule
+\end{tabular}}
+\end{table}
+At first glance, these results are counter-intuitive: a simple drift baseline outperforms the tested GNN variants under this protocol. This suggests that much of the apparent predictability is trend-driven, which motivates the drift-corrected evaluation presented next. 
+
+\subsection{Learning on the smoothed relative-growth target}
+The smoothed heatmaps in Figure~\ref{fig:relative_growth_heatmaps_smooth} suggest a compromise between interpretability and temporal resolution: the signal is much calmer than the raw monthly relative ratio, but it still preserves monthly timestamps. To test whether this stabilized signal is learnable at all, we ran an additional full-heatmap experiment with the same split and compact architectures, replacing the residual target by the future value of the trailing-12 / lag-12 relative-growth series (\texttt{TARGET\_MODE=smooth\_relative\_level}).
+
+\begin{table}[htbp]
+\centering
+\caption{Evaluation on the full heatmap under \texttt{TARGET\_MODE=smooth\_relative\_level}. The predicted signal is the future value of the trailing-12 / lag-12 relative-growth series. Results come from the unified diagnostics run on all 532 active keywords, with \texttt{TEMP\_WINDOW=12} and \texttt{FORECAST=24}.}
+\label{tab:smooth_relative_comparison}
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{lccc}
+\toprule
+name & MAE & RMSE & note \\
+\midrule
+graph\_base & 0.228 & 0.329 & standard graph-attention model \\
+graph\_mix & 0.227 & 0.326 & prediction-level graph/node mixture \\
+graph\_multi & 0.225 & 0.327 & lag-aware multi-graph encoder \\
+graph\_multi\_mix & \textbf{0.227} & \textbf{0.325} & lag-aware graph/node mixture \\
+nograph & 0.232 & 0.336 & shared node-only control \\
+persist & 0.279 & 0.394 & last-value baseline on the same target \\
+drift (L=24) & 0.492 & 0.675 & node-wise linear extrapolation baseline \\
+\bottomrule
+\end{tabular}}
+\end{table}
+
+Unlike the residual protocol in Table~\ref{tab:diagnostics_full}, the learned models now clearly outperform both hand-crafted baselines. The best learned model, \texttt{graph\_multi\_mix}, lowers RMSE from \(0.394\) to \(0.325\) relative to persistence, i.e., about \(17.5\%\) lower RMSE, and improves over drift by about \(51.9\%\) in RMSE. So the smoothed relative-growth signal is not pure noise: once monthly endpoint instability is damped, the future relative-momentum series becomes learnable.
+
+However, the graph contribution itself remains modest. The unified diagnostics run shows a single shared \texttt{nograph} baseline with RMSE \(0.336\), while the best graph-aware variant, \texttt{graph\_multi\_mix}, reaches \(0.325\). So the gain from explicit graph structure is real but small relative to the larger gain obtained by changing the target definition itself. In other words, the main result of this section is that the stabilized relative target becomes learnable, while message passing adds only limited incremental value beyond a strong node-history model. This interpretation is consistent with the observed training behavior: validation RMSE drops quickly in the first few epochs and then plateaus after early stopping, suggesting that the models extract an accessible temporal signal but not a large extra graph-specific effect.
+
+
+\subsection{Drift-corrected target: why and what it changes}
+To test whether graph structure adds value beyond simple extrapolation, we introduced a
+drift-corrected target:
+\[
+y^{\text{drift\_res}}_{c,t}
+=
+E(c,t+\Delta)-\widehat{E}^{\text{drift}}(c,t+\Delta \mid t).
+\]
+This protocol changes the question from ``who best follows trend level?'' to
+``who best predicts deviations around a drift forecast?''.
+Methodologically, this is the right test when we want to evaluate added predictive structure rather
+than reward trend-following behavior that is already captured by the drift baseline.
+
+In this protocol, the drift baseline predicts zero residual by construction:
+\[
+\hat{y}^{\text{drift}}_{c,t}=0.
+\]
+Hence drift MAE is generally not zero; it measures the empirical magnitude of true drift errors
+$|E(c,t+\Delta)-\widehat{E}^{\text{drift}}(c,t+\Delta\mid t)|$.
+Large values are expected when drift misses accelerations, regime changes, or heavy-tail events.
+This does not contradict earlier results where drift was strong under \texttt{TARGET\_MODE=residual}:
+the two tasks are different (trend-following residuals vs residuals around an explicit drift forecast).
+
+We then reran this protocol on the current full-heatmap graph built from the updated Step~4 outputs,
+keeping the same simple training recipe
+(\texttt{TEMP\_WINDOW=12}, \texttt{FORECAST=24}, default compact architecture, no Optuna sweep), using
+\texttt{TARGET\_MODE=drift\_residual} on all active heatmap keywords (\(N=532\)).
+
+\begin{table}[htbp]
+\centering
+\caption{Evaluation results under \texttt{TARGET\_MODE=drift\_residual} on the full heatmap.}
+\label{tab:drift_residual_comparison}
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{lcccccc}
+\toprule
+name & MAE & RMSE & hidden\_channels & num\_heads & temp\_window & forecast \\
+\midrule
+graph\_base & 3.165 & 8.551 & 32 & 2 & 12 & 24 \\
+graph\_mix & 3.140 & 8.545 & 32 & 2 & 12 & 24 \\
+graph\_multi & 3.168 & 8.538 & 32 & 2 & 12 & 24 \\
+graph\_multi\_mix & 3.163 & 8.560 & 32 & 2 & 12 & 24 \\
+nograph & \textbf{3.100} & \textbf{8.532} & 32 & 2 & 12 & 24 \\
+persist & 3.501 & 11.207 & -- & -- & 12 & 24 \\
+drift & 3.179 & 8.708 & -- & -- & 12 & 24 \\
+\bottomrule
+\end{tabular}}
+\end{table}
+
+The absolute MAE/RMSE values in Table~\ref{tab:drift_residual_comparison} should not be compared directly to those in Table~\ref{tab:diagnostics_full}.
+The two evaluations are defined on different targets: \texttt{TARGET\_MODE=residual} predicts
+\(E(c,t+\Delta)-E(c,t)\), whereas \texttt{TARGET\_MODE=drift\_residual} predicts
+\(E(c,t+\Delta)-\widehat{E}^{\text{drift}}(c,t+\Delta \mid t)\).
+These targets are linked by a deterministic shift computed from the same past series, so similar score magnitudes are not surprising.
+In particular, the persistence and drift baselines are numerically identical across the two protocols by construction; the meaningful comparison is therefore within each table, i.e., against the corresponding baseline, rather than across tables by raw MAE/RMSE.
+
+Once drift is explicitly removed from the target, all learned models still outperform the drift baseline,
+which confirms that the pipeline captures predictive structure beyond pure drift extrapolation.
+However, the gain is now modest rather than large: the best model, \texttt{nograph}, reaches
+RMSE \(8.532\) versus \(8.708\) for drift, i.e., about \(2.0\%\) lower RMSE.
+Graph variants remain very close to this node-only baseline, but none improves on it; the best graph
+RMSE is \(8.538\) for \texttt{graph\_multi}, and the best graph MAE is \(3.140\) for \texttt{graph\_mix}.
+So, in this updated protocol, the evidence supports a weak non-drift signal, but not a clear added value
+from graph structure over a strong node-only learner.
+
+\subsection{Horizon sensitivity (1Y to 4Y)}
+To quantify horizon sensitivity, we retrained all core diagnostics models for \texttt{FORECAST} \(=\{12,24,36,48\}\) months under two target settings:
+\texttt{TARGET\_MODE=drift\_residual} (drift-corrected) and
+\texttt{TARGET\_MODE=smooth\_relative} (relative setting).
+Each horizon uses the same diagnostics protocol. Table~\ref{tab:horizon_combined}
+reports RMSE by model (rows) and horizon year (columns) for both views.
+
+\begin{table}[htbp]
+\centering
+\caption{Horizon comparison (RMSE) across two target views: drift-corrected residuals (\texttt{TARGET\_MODE=drift\_residual}) and smoothed relative levels (\texttt{TARGET\_MODE=smooth\_relative}). Models were retrained for each horizon (\(1\)Y to \(4\)Y). Best score in each column is in bold.}
+\label{tab:horizon_combined}
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{lcccccccc}
+\toprule
+& \multicolumn{4}{c}{Drift-corrected} & \multicolumn{4}{c}{Relative} \\
+\cmidrule(lr){2-5}\cmidrule(lr){6-9}
+Model & 1Y & 2Y & 3Y & 4Y & 1Y & 2Y & 3Y & 4Y \\
+\midrule
+drift & 3.429 & 9.291 & 13.166 & 18.751 & 0.464 & 0.622 & 0.805 & 1.052 \\
+graph\_base & \textbf{3.368} & 8.728 & 12.680 & 17.951 & \textbf{0.259} & 0.313 & 0.332 & 0.378 \\
+graph\_mix & 3.372 & \textbf{8.675} & 12.540 & 17.825 & 0.265 & 0.319 & \textbf{0.327} & 0.378 \\
+graph\_multi & 3.400 & 8.932 & 12.580 & 18.100 & 0.271 & 0.311 & 0.327 & \textbf{0.373} \\
+graph\_multi\_mix & 3.695 & 8.868 & 12.286 & 18.094 & 0.265 & \textbf{0.306} & 0.329 & 0.376 \\
+nograph & 3.401 & 8.709 & \textbf{12.096} & \textbf{17.754} & 0.264 & 0.330 & 0.328 & 0.378 \\
+persist & 4.658 & 13.117 & 17.940 & 23.870 & 0.345 & 0.360 & 0.369 & 0.434 \\
+\bottomrule
+\end{tabular}}
+\end{table}
+
+Interpretation-wise, the best model changes with horizon, but differences among learned models remain small compared with the two baselines. In the drift-corrected view, RMSE increases strongly from 1Y to 4Y, and the gains over \texttt{drift} stay modest, suggesting that long-horizon residual forecasting remains difficult after detrending. In the relative view, all learned models clearly outperform both \texttt{persist} and \texttt{drift}, yet error still rises with horizon, indicating that normalization reduces scale effects but does not remove genuine lead-time difficulty.
+
+\newpage
+\section{Discussion}
+The findings reported above suggest several key insights and directions for future work.
+
+\subsection{Scope of the forecasting objective}
+At this stage, the project addresses two related but distinct forecasting objectives:
+\begin{itemize}
+  \item forecasting future concept mass or visibility within the corpus;
+  \item identifying currently weak concepts whose future rise may justify additional analyst attention.
+\end{itemize}
+
+In the original formulation, the main experiments relied on \texttt{TARGET\_MODE=residual}, which is better aligned with the first objective than with the second. This is why residual or raw-score outputs tend to emphasize broad or already mature concepts such as \textit{LEO}, \textit{GNSS}, and closely related lexical variants: they are forecasting future corpus momentum, not specifically niche emergence.
+
+The additional experiments on \texttt{TARGET\_MODE=smooth\_relative\_level} refine this conclusion. The relevant distinction is not that relative growth is intrinsically harder than raw gain. Raw gain and relative gain encode the same future change in different coordinates, but the unsmoothed monthly ratio target was badly conditioned because noisy monthly endpoints and small denominators made the label unstable. Once stabilized with a trailing-window smoothing step, the relative-growth formulation proved both interpretable and learnable. In that sense, relative growth should not be discarded altogether: once stabilized, it becomes a reasonable proxy for niche emergence, because it emphasizes sustained proportional rise rather than only future absolute mass.
+
+This result changes the interpretation of the pipeline. The system should now be understood as supporting two complementary forecasting views: a raw/residual view for future corpus dominance, and a smoothed relative-growth view for niche-sensitive momentum. The latter is closer to the original operational objective of early emergence monitoring.
+
+However, the smoothed relative target remains a proxy whose meaning depends on the smoothing window, lag, and denominator stabilizer. It captures sustained relative momentum rather than abrupt month-level emergence shocks, and overlapping trailing windows reduce the effective independence of adjacent monthly labels. Under that relative view, the graph-aware family now improves on the shared \texttt{nograph} baseline, with \texttt{graph\_multi\_mix} achieving the best RMSE, but the margin remains modest. Therefore, the main gain comes from target design and temporal learning rather than from a large standalone advantage of message passing. The outputs should still be interpreted as analyst support signals rather than as a fully automatic detector of niche emergence.
+
+\subsection{Why drift correction changes the task}
+Intuitively, switching from \texttt{TARGET\_MODE=residual} to \texttt{TARGET\_MODE=drift\_residual} changes the reference point used to describe the same future value. The residual target asks, ``how far is the future from today?'' By contrast, the drift-residual target asks, ``how far is the future from a simple node-wise drift forecast?'' This is not merely a relabeling of the score table. The hand-crafted persistence and drift baselines keep the same MAE/RMSE across both protocols only because their predictions are rewritten in the same coordinate system as the new target, so their pointwise errors are preserved by construction. The learned models are different: they are retrained on a new target distribution and therefore solve a different supervised problem.
+
+In principle, a sufficiently expressive temporal model could learn this decomposition implicitly, i.e., infer the dominant trend and then model the deviation around it. In practice, that is not guaranteed in the present setup. First, the explicit drift comparator uses a 24-month lag, whereas the neural models are trained with \texttt{TEMP\_WINDOW=12}, so the network does not receive the same trend summary as the hand-built baseline. Second, under \texttt{TARGET\_MODE=residual} the loss is dominated by the large and relatively easy trend component, so optimization is rewarded mainly for following the main trajectory rather than for extracting the smaller residual around drift. Third, limited capacity, regularization, and early stopping can make the model stop after learning the easy component while leaving part of the weaker correction signal unexplained.
+
+This is why detrending can improve all learned models, including \texttt{nograph}, without implying that graph structure is being specially favored. The main effect of \texttt{drift\_residual} is to remove a strong node-wise signal before training, so the learner can focus on the harder leftover term. In the present results, that change reveals a modest non-drift signal, but not a clear graph-specific gain: \texttt{nograph} remains the best model in RMSE, and the graph variants stay extremely close to it. The appropriate interpretation is therefore not that graph models suddenly become better forecasters in an absolute sense, but that detrending makes it easier to test whether any model captures information beyond simple drift extrapolation.
+
+\subsection{Mismatch between target and graph structure}
+Another important limitation is that the predicted emergence score is not fully aligned with the relational structure given to the graph model. The target combines several components, including cumulative citation-based information, occurrence frequency, and co-occurrence intensity. By contrast, the graph used for message passing is built only from keyword co-occurrence links.
+
+As a result, part of the target is structurally matched to the graph, but another part is only weakly related to it. In particular, citation accumulation may follow mechanisms that are not well encoded by co-occurrence neighborhoods alone. The model is therefore asked, at least in part, to predict a label whose main variation may come from signals that are not represented in the graph topology. Under such conditions, limited gains from graph structure are not surprising: node-wise or drift-like baselines can already capture much of the trend, while message passing may add little useful information.
+
+This point suggests two natural extensions. The first is to evaluate citation-agnostic targets, in order to isolate more cleanly the predictive value of co-occurrence structure itself. The second is to enrich the relational representation, for example by incorporating a citation graph or a multi-relational graph, so that the inductive bias of the model is better aligned with the quantity being predicted.
+
+\section{Conclusion}
+For technology monitoring, one implication is that, in the present bibliometric use case, explicitly modeling the graph topology of the scientific landscape does not appear to be necessary for anticipating future technological momentum. Although this conclusion may seem counterintuitive, a plausible explanation is that much of the useful topological information is already absorbed into the temporal histories of individual concepts. Repeated co-occurrence structure shapes node-level feature trajectories over time, so part of the graph signal may already be encoded in those past traces before message passing is applied.
+
+Overall, based on the data used here, this study does not support a strong claim that graph neural networks automatically improve bibliometric technology monitoring. It does, however, clarify the conditions under which they might help.
+
+\section*{Code Availability}
+Code and configuration files used in this study are available at \url{https://github.com/Paulbagourd/gnn_project} (release \texttt{v1.0-scientometrics}, DOI: \url{https://doi.org/10.5281/zenodo.TODO}). A small synthetic sample dataset is included for quick reproducibility checks.
+
+\section*{Data Availability}
+The full OpenAlex-derived corpus analyzed in this study is not redistributed in this repository due to size and third-party reuse constraints. Scripts and configuration files required to reconstruct the corpus from OpenAlex are provided in the public code repository.
+
+\begin{thebibliography}{99}
+  \bibitem{coccia2005technometrics} M. Coccia, ``Technometrics: Origins, historical evolution and new directions,'' \textit{Technological Forecasting \& Social Change}, vol. 72, no. 8, pp. 944--979, 2005.
+  \bibitem{lee2021review} C. Lee, ``A review of data analytics in technological forecasting,'' \textit{Technological Forecasting \& Social Change}, vol. 166, p. 120646, 2021.
+  \bibitem{haleem2019tf} A. Haleem, B. Mannan, S. Luthra, S. Kumar, and S. Khurana, ``Technology forecasting and technology assessment methodologies: A conceptual review,'' \textit{Benchmarking: An International Journal}, vol. 26, no. 1, pp. 48--72, 2019.
+  \bibitem{calleja2020forecasting} G. Calleja-Sanz, J. Olivella-Nadal, and F. Solé-Parellada, ``Technology forecasting: Recent trends and new methods,'' in \textit{Research Methodology in Management and Industrial Engineering}, pp. 45--69, Springer, 2020.
+  \bibitem{daim2016anticipating} T. U. Daim, D. Chiavetta, A. L. Porter, and O. Saritas, \textit{Anticipating Future Innovation Pathways through Large Data Analysis}. Springer, 2016.
+  \bibitem{dotsika2017disruptive} F. Dotsika and A. Watkins, ``Identifying potentially disruptive trends by means of keyword network analysis,'' \textit{Technological Forecasting \& Social Change}, vol. 119, pp. 114--127, 2017.
+  \bibitem{singer2014cybersecurity} P. W. Singer and A. Friedman, \textit{Cybersecurity and Cyberwar: What Everyone Needs to Know}. Oxford University Press, 2014.
+  \bibitem{krenn2020predicting} M. Krenn and A. Zeilinger, ``Predicting research trends with semantic and neural networks with an application in quantum physics,'' \textit{Proceedings of the National Academy of Sciences}, vol. 117, no. 4, pp. 1910--1916, 2020.
+  \bibitem{gu2024impact4cast} X. Gu and M. Krenn, ``Forecasting high-impact research topics via machine learning on evolving knowledge graphs,'' \textit{Machine Learning: Science and Technology}, vol. 5, no. 4, p. 045003, 2024.
+  \bibitem{he2019topicforecast} W. He, Y. Deng, and H. Liu, ``Forecasting research topic popularity via recurrent neural models,'' in \textit{Proc. AAAI Workshop on Scholarly Big Data}, 2019.
+  \bibitem{xu2020trendrnn} J. Xu, R. Chen, and L. Wang, ``TrendRNN: Temporal modeling of topic trajectories with recurrent networks,'' \textit{Journal of Informetrics}, vol. 14, no. 3, pp. 101050, 2020.
+  \bibitem{li2021dstgtn} Z. Li, Y. Wang, and Q. Wu, ``DST-GTN: Dynamic spatio-temporal graph transformer network for traffic forecasting,'' in \textit{Proc. ACM SIGKDD}, 2021.
+  \bibitem{zhao2023tgat} H. Zhao, L. Zhang, and Q. Liu, ``Temporal graph attention network for spatio-temporal feature extraction in research topic trend prediction,'' \textit{IEEE Access}, vol. 11, pp. 98532--98545, 2023.
+  \end{thebibliography}
+
+\appendix
+\section{Appendix}
+
+
+\subsection{graph\_base optimisation}
+To optimize \texttt{graph\_base} under the same residual protocol, we reran an Optuna sweep on the
+full heatmap with fixed \texttt{FORECAST=24}.
+The search varied \texttt{HIDDEN\_CHANNELS}, \texttt{NUM\_HEADS}, and \texttt{TEMP\_WINDOW}
+(restricted to values $<12$), along with dropout, optimizer, and graph-configuration choices.
+Table~\ref{tab:graph_base_optuna_trials} reports
+\textbf{post-evaluation test} MAE/RMSE for each recorded trial.
+Rows marked \texttt{pruned} were stopped early by Optuna, either because they were judged unpromising
+by the pruner or because they never reached a valid completed evaluation.
+\newline
+Regarding \texttt{TEMP\_WINDOW}, there is a standard trade-off: larger windows provide more temporal context per sample,
+while smaller windows increase the number of training windows (\(n_{\text{windows}} = T' - \texttt{TEMP\_WINDOW} + 1\)).
+In this sweep (\texttt{TEMP\_WINDOW} from 4 to 10), this changes total windows from 223 down to 217.
+Comparability is preserved here because \texttt{SPLIT\_DATES} is fixed; all runs use the same calendar test period
+(2020-04 to 2023-10) and the same number of test windows.
+Medium windows (6--8) now dominate the test ranking, whereas several 10-month settings were favored by
+Optuna's validation objective; notably, trial 13 was the validation winner but not the best final test
+configuration. So the ranking under Optuna's validation objective does not perfectly transfer to final test ranking.
+Still, all completed \texttt{graph\_base} trials improve over \texttt{persist} (RMSE 11.207), but none beats
+\texttt{drift} (RMSE 8.708), which remains the strongest baseline under \texttt{TARGET\_MODE=residual} in the
+harder full-heatmap regime.
+
+\begin{table}[H]
+\centering
+\caption{\texttt{graph\_base} Optuna experiments with post-evaluation on the fixed test split for the full-heatmap residual setting (no keyword cap, 532 active keywords, \texttt{FORECAST=24}, 23 recorded trials).}
+\label{tab:graph_base_optuna_trials}
+\scriptsize
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{ccccccc}
+\toprule
+trial & status & mae & rmse & hidden\_channels & num\_heads & temp\_window \\
+\midrule
+0 & complete & 3.158 & 9.988 & 96 & 2 & 4 \\
+1 & complete & \textbf{3.108} & 9.660 & 96 & 1 & 6 \\
+2 & complete & 3.109 & 9.583 & 48 & 4 & 8 \\
+3 & complete & 3.181 & 9.573 & 32 & 4 & 4 \\
+4 & complete & 3.413 & 9.675 & 48 & 2 & 4 \\
+5 & complete & 3.180 & 9.646 & 64 & 1 & 10 \\
+6 & complete & 3.204 & 9.726 & 48 & 2 & 10 \\
+7 & complete & 3.185 & 9.649 & 64 & 4 & 10 \\
+8 & complete & 3.124 & 9.617 & 32 & 2 & 8 \\
+9 & pruned & -- & -- & 16 & 1 & 4 \\
+10 & complete & 3.232 & 9.654 & 64 & 4 & 10 \\
+11 & complete & 3.255 & 9.693 & 64 & 4 & 10 \\
+12 & pruned & -- & -- & 64 & 4 & 10 \\
+13 & complete & 3.196 & 9.658 & 64 & 4 & 10 \\
+14 & complete & 3.265 & 10.169 & 64 & 4 & 6 \\
+15 & complete & 3.257 & \textbf{9.566} & 64 & 4 & 6 \\
+16 & complete & 3.160 & 9.641 & 16 & 4 & 10 \\
+17 & pruned & -- & -- & 64 & 4 & 10 \\
+18 & pruned & -- & -- & 64 & 4 & 10 \\
+19 & pruned & -- & -- & 64 & 4 & 10 \\
+20 & pruned & -- & -- & 32 & 1 & 8 \\
+21 & pruned & -- & -- & 16 & 4 & 10 \\
+22 & complete & 3.164 & 9.680 & 64 & 4 & 10 \\
+\bottomrule
+\end{tabular}}
+\normalsize
+\end{table}
+
+\subsection{What graph\_mix is supposed to fix}
+Graph\_mix introduces an explicit mixing head that blends a node-only prediction with a
+graph-based prediction:
+\[
+\hat{y} = \alpha \cdot \hat{y}_{\text{graph}} + (1-\alpha) \cdot \hat{y}_{\text{node}},
+\quad \alpha \in [0,1].
+\]
+The variance-weighted penalty is designed to push $\alpha$ toward $0$ (node-only) on stable nodes
+where neighbor signal is not helpful, while allowing larger $\alpha$ on volatile nodes. This is implemented as:
+\[
+\mathcal{L} = \mathcal{L}_{\text{task}} + \lambda \cdot \mathbb{E}[w \cdot \alpha],
+\quad w \propto \frac{1}{\sigma_{\text{train}}+\varepsilon},
+\]
+so low-variance nodes receive stronger pressure to reduce the graph contribution.
+Here each term means:
+\begin{itemize}
+  \item $\mathcal{L}$: total loss minimized during training.
+  \item $\mathcal{L}_{\text{task}}$: main prediction loss (e.g., RMSE/Huber) on the forecast target.
+  \item $\lambda$: penalty strength; higher values push $\alpha$ lower on stable nodes.
+  \item $\alpha$: mix coefficient output by the mixing head; $\alpha=1$ uses only graph prediction,
+  $\alpha=0$ uses only node-only prediction.
+  \item $w$: per-node weight computed from training data; $w \propto 1/(\sigma_{\text{train}}+\varepsilon)$ and
+  normalized by its mean so the penalty scale is stable.
+  \item $\sigma_{\text{train}}$: per-node standard deviation of the training targets (volatility).
+  \item $\varepsilon$: small constant to avoid division by zero.
+  \item $\mathbb{E}[\cdot]$: average over nodes in the batch.
+\end{itemize}
+These fixes are practical because they preserve the graph pathway while preventing it from
+dominating stable nodes. The expected impact is:
+\begin{itemize}
+  \item \textbf{Lower error on stable nodes.} By pushing $\alpha \rightarrow 0$ where variance is
+  low, the model should converge toward persistence-like behavior on easy nodes.
+  \item \textbf{Selective graph benefit.} Nodes with higher variance should retain graph signal,
+  which is where any improvement is most plausible.
+\end{itemize}
+
+\subsection{Scale Effects in Horizon RMSE and Scale-Free Comparison}
+Raw RMSE across horizons is not fully comparable when the underlying level grows (here, approximately exponentially with mass accumulation). In the drift-corrected (absolute) view, higher RMSE at 3Y--4Y is therefore partly a scale/heteroscedasticity effect, not only an information effect. In the relative view, this scale inflation is largely normalized out. Since RMSE still increases from 1Y to 4Y in the relative setting, the horizon effect is also real: prediction becomes harder with lead time because uncertainty and error accumulation increase. The appropriate interpretation is that longer-horizon prediction is harder for two reasons at once: genuine horizon difficulty and level-dependent noise inflation in absolute-space targets.
+
+\begin{table}[H]
+\centering
+\caption{Scale-free horizon comparison with horizon-specific baselines. For each horizon $h$, we report test-split dispersion $\sigma_h=\mathrm{std}(y_h)$, the best learned RMSE, $\mathrm{RRMSE}_{\mathrm{best},h}=\mathrm{RMSE}_{\mathrm{best},h}/\sigma_h$, $\mathrm{Skill}^{\mathrm{persist}}_h=1-\mathrm{RMSE}_{\mathrm{best},h}/\mathrm{RMSE}_{\mathrm{persist},h}$, $\mathrm{Skill}^{\mathrm{drift}}_h=1-\mathrm{RMSE}_{\mathrm{best},h}/\mathrm{RMSE}_{\mathrm{drift},h}$, and $R_h^2=1-\mathrm{MSE}_{\mathrm{best},h}/\mathrm{MSE}_{\mathrm{mean},h}$, where $\mathrm{MSE}_{\mathrm{mean},h}$ is the test-mean predictor baseline at horizon $h$.}
+\label{tab:appendix_scale_free_horizon}
+\small
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{lcccccccc}
+\toprule
+& \multicolumn{4}{c}{Drift-corrected} & \multicolumn{4}{c}{Relative} \\
+Metric & 1Y & 2Y & 3Y & 4Y & 1Y & 2Y & 3Y & 4Y \\
+\midrule
+Test $\sigma_h=\mathrm{std}(y_h)$ & 3.401 & 8.920 & 12.526 & 17.766 & 0.246 & 0.287 & 0.298 & 0.336 \\
+Best learned RMSE & 3.368 & 8.675 & 12.096 & 17.754 & 0.259 & 0.306 & 0.327 & 0.373 \\
+Best model & graph base & graph mix & nograph & nograph & graph base & graph multi mix & graph mix & graph multi \\
+Best learned RRMSE & 0.990 & 0.973 & 0.966 & 0.999 & 1.051 & 1.068 & 1.099 & 1.110 \\
+Persist RMSE & 4.658 & 13.117 & 17.940 & 23.870 & 0.345 & 0.360 & 0.369 & 0.434 \\
+Drift RMSE & 3.429 & 9.291 & 13.166 & 18.751 & 0.464 & 0.622 & 0.805 & 1.052 \\
+Skill vs persist & 0.277 & 0.339 & 0.326 & 0.256 & 0.249 & 0.150 & 0.114 & 0.141 \\
+Skill vs drift & 0.018 & 0.066 & 0.081 & 0.053 & 0.442 & 0.507 & 0.593 & 0.645 \\
+Best $R_h^2$ vs mean & 0.019 & 0.054 & 0.067 & 0.001 & -0.106 & -0.140 & -0.207 & -0.232 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Table~\ref{tab:appendix_scale_free_horizon} and Table~\ref{tab:appendix_rrmse_horizon_models} provide a scale-free cross-horizon view. Raw RMSE increases strongly with horizon, but variance-normalized error (RRMSE) is mostly stable in the drift-corrected view and only mildly increasing in the relative view. This suggests that much of the horizon RMSE growth is scale-driven, with only limited residual horizon difficulty after normalization.
+
+\begin{table}[H]
+\centering
+\caption{Horizon comparison in normalized error units: $\mathrm{RRMSE}_h=\mathrm{RMSE}_h/\mathrm{std}(y_h)$, where $\mathrm{std}(y_h)$ is computed on the test split with the same valid mask as evaluation. Lower is better. Best score in each column is in bold.}
+\label{tab:appendix_rrmse_horizon_models}
+\small
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{lcccccccc}
+\toprule
+& \multicolumn{4}{c}{Drift-corrected} & \multicolumn{4}{c}{Relative} \\
+Model & 1Y & 2Y & 3Y & 4Y & 1Y & 2Y & 3Y & 4Y \\
+\midrule
+drift & 1.0083 & 1.0416 & 1.0511 & 1.0554 & 1.8856 & 2.1677 & 2.7006 & 3.1297 \\
+graph base & \textbf{0.9902} & 0.9784 & 1.0123 & 1.0104 & \textbf{1.0515} & 1.0898 & 1.1124 & 1.1252 \\
+graph mix & 0.9914 & \textbf{0.9726} & 1.0011 & 1.0033 & 1.0754 & 1.1113 & \textbf{1.0985} & 1.1256 \\
+graph multi & 0.9996 & 1.0013 & 1.0043 & 1.0188 & 1.1023 & 1.0826 & 1.0989 & \textbf{1.1101} \\
+graph multi mix & 1.0865 & 0.9942 & 0.9808 & 1.0185 & 1.0772 & \textbf{1.0679} & 1.1025 & 1.1196 \\
+nograph & 1.0001 & 0.9764 & \textbf{0.9657} & \textbf{0.9993} & 1.0714 & 1.1488 & 1.1017 & 1.1244 \\
+persist & 1.3695 & 1.4706 & 1.4322 & 1.3436 & 1.4026 & 1.2539 & 1.2390 & 1.2930 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\end{document}
+
+
+

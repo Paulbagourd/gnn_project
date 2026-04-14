@@ -1,0 +1,488 @@
+paths:
+  raw_dir: "."  # Use the current working directory for raw artefacts
+
+run:
+  steps: [01_extract, 02_keywords, 03_refined, 04_build_graph, 05_train_gnn, 06_predict]  # Ordered pipeline steps
+  force: false  # Regenerate outputs when true
+  up_to: null  # Optional cutoff step (null = run all)
+
+params:
+
+  # ---- step_01 (extract from OpenAlex) ----
+  openalex_mailto: "paul.bagourd.ar@gmail.com"  # Contact email for OpenAlex requests
+  topics_search_seed:  # Domain-specific topics driving OpenAlex queries
+    - "Satellite Communication Systems"
+    - "Antenna Design and Analysis"
+    - "Antenna Design and Optimization"
+    - "Millimeter-Wave Propagation and Modeling"
+    - "Network Security and Intrusion Detection"
+    - "Cryptography and Data Security"
+    - "GNSS positioning and interference"
+    - "Inertial Sensor and Navigation"
+    - "Indoor and Outdoor Localization Technologies"
+    - "Satellite Image Processing and Photogrammetry"
+    - "Remote-Sensing Image Classification"
+    - "Remote Sensing and LiDAR Applications"
+    - "Data Management and Algorithms"
+    - "Wireless Sensor Networks and IoT"
+    - "Security in Wireless Sensor Networks"
+    - "Energy-Efficient Wireless Sensor Networks"
+    - "IoT and Edge/Fog Computing"
+    - "Space exploration and regulation"
+    - "European and International Law Studies"
+    - "International Relations and Foreign Policy"
+    - "Cybersecurity and Cyber Warfare Studies"
+    - "Global Peace and Security Dynamics"
+    - "Spacecraft Dynamics and Control"
+  refined_topics_csv: refined_topics.csv  # Curated topic list used during extraction
+  per_page: 200  # Maximum OpenAlex records fetched per request
+  max_workers: 3  # Parallel request threads
+  request_sleep: 0.25  # Delay between request bursts (seconds)
+  max_pages_per_topic: 0  # Topic-level page cap (0 = no cap)
+  max_total_pages: 0  # Global page cap across topics (0 = no cap)
+  stop_after_seconds: 0  # Time limit for extraction (0 = unlimited)
+  type_filter: null # "journal-article|proceedings-article|preprint|book-chapter"  # Allowed document types allow all : "*"
+  language: "en"  # Restrict results to English-language abstracts
+  filter_types: false  # Keep works regardless of OpenAlex document type
+  filter_gbif: true   # Keep GBIF-related records
+  fetch_pages: true  # Skip OpenAlex fetch when set to false (reuse existing stored pages)
+  relevant_columns:  # Columns persisted to combined.csv
+    - id
+    - title
+    - publication_date
+    - language
+    - doi
+    - cited_by_count
+    - referenced_works
+    - primary_topic.id
+    - primary_topic.display_name
+    - Abstract
+    - type
+  start_year: 1987  # Earliest publication year kept during balancing
+  chunk_size: 200000  # CSV rows processed per chunk when streaming merges
+  random_state: 42  # RNG seed so sampling and redistribution stay deterministic
+  spike_win: 6  # Months to look backward/forward when smoothing monthly spikes
+  spike_cap: 0.8  # Maximum share of a spike month that can be moved elsewhere
+  sigma_mult: 3.0  # Standard-deviation multiplier for spike detection threshold
+  min_abs_bump: 200  # Minimum excess volume that triggers spike redistribution
+  weight_alpha: 0  # Blend factor between observed monthly share and uniform target
+  weight_tau: 1  # Target mean keep probability applied during final sampling
+
+  # ---- step_02 (keywords) ----
+  compute: false  # Regenerate keywords locally
+  colab: false  # Do not delegate to Colab for this use case
+  keybert_model: "sentence-transformers/allenai-specter"  # KeyBERT model identifier
+  keybert_model_path: "models/allenai-specter"  # Local cache directory for the model
+  keyword_ngram: [2, 3]  # N-gram range for candidate phrases
+  sample_papers: 500  # Abstracts sampled for keyword extraction
+  keyword_topn: 20  # Keywords kept per abstract
+  threads: 4  # Parallel extraction threads
+  keyword_nr_candidates: 80  # Raw candidate phrases per abstract
+  keyword_diversity: 0.6  # Diversity factor for MMR
+  keyword_stop_words: ["english", "paper", "proposed", "method", "results", "demonstrate", "abstract", "graphical", "email"]  # Stop-word list for KeyBERT
+  keyword_strict_literal: true  # Enforce literal token matches
+  keyword_jaccard_threshold: 0.5  # Jaccard similarity cap when deduplicating
+  forced_keywords: ["cyber threats","noma","satellite oscillator anomaly","mimo", "mac","anomaly", "sparta", "LEO Constellations", "miniaturization", "small satellites", "CubeSats", "laser communications", "Launching technologies", "Space data center", "Interplanetary networking", "Next-generation network", "5G", "6G", "Problem Detection", "SPARTA", "GNSS threats", "Jamming", "spoofing", "Location privacy", "Eavesdropping", "Supply chain attacks", "Software vulnerabilities research", "fuzzing", "Ground station attacks", "Satellite hijacking", "Security of space situational awareness", "SSA", "Non-terrestrial networks", "optical networking", "wireless attacks", "Enhanced encryption", "PQC", "Quantum key distribution", "QKD", "integration over satellites", "Satellite fingerprinting", "Security policies for space", "Standardization for space technologies", "CCSDS", "ECSS", "Security assurance", "accreditation", "certification", "Software security for Space Systems", "Space Systems", "Intrusion detection system", "IDS", "Forensics", "Cooperation and information sharing", "Space-based quantum networks", "Secure operating systems", "Satellite honeypots", "Security testbed", "International regulation", "Frequency limitations and debris", "Economic and political strategies", "space battleground"]
+  keyword_aliases:
+    neural networks: ["neural network", "neural networks", "neural net"]
+    leo satellite: ["leo satellite", "leo satellites"]
+    satellite networks: ["satellite network", "satellite networks"]
+    gnss receiver: ["gnss receiver", "gnss receivers"]
+    ntn: ["ntn", "non terrestrial networks"]
+  ARE_THERE_KEYWORDS: ["cybersecurity", "cyber warfare", "intrusion detection", "zero trust", "cyber resilience", "threat intelligence"]  # Coverage check list
+  remove_keywords: ["http www","gt etx", "xlink gt", "neural network","http www" , "widely used" , "global navigation satellite", "existing methods", "support vector","case studies","widely used", "future research","long term","existing methods","simulation results","decision making","time series","cloud computing","point clouds","intrusion detection systems","title abstract","title abstract title","abstract title","machine learning ml","energy consumption","artificial intelligence ai","high accuracy","recent years","cyber attacks","extensive experiments","paper presents","paper proposes","real world","proposed method","results demonstrate", "graphical abstract", "email share", "state", "things iot", "deep", "content", "smart", "fauna", "forest", "et al."]  # Keywords removed during keyword post-processing
+  remove_patterns: ["org ", "ieee ", "of ", " are"]
+  device: "auto"  # Allow the pipeline to auto-select CPU/GPU
+
+  # ---- step_03 (refined collection + keywords) ----
+  refined_collection:
+    enabled: true  # Toggle the refined-collection pass
+    scan_column: "scan"  # Column used to flag scan topics
+    accepted_values: ["x"]  # Values treated as affirmative markers
+    topics_csv: null  # Optional override of the refined topics CSV
+    min_keyword_hits: 1  # Keep papers that match at least this many primary keywords
+    text_column: "Abstract"  # Column containing the raw abstract text
+    use_normalized_text: true  # Prefer a normalised abstract column when present
+    apply_norm_if_needed: true  # Create a normalised column when missing
+    papers_csv: "papers.csv"  # Source papers file to scan
+    output_papers_csv: "refined_papers.csv"  # Refined corpus filename emitted by step_03_refined
+    write_match_counts: false  # Persist per-paper keyword hit counts for debugging
+
+  refined_keywords:
+    compute: true  # Always recompute refined keywords locally
+    colab: false  # Set true to offload refined keyword extraction to Colab
+    keybert_model: "sentence-transformers/allenai-specter"  # Same extractor as the primary pass
+    keybert_model_path: "models/allenai-specter"
+    keyword_ngram: [2, 3]
+    sample_papers: 15000
+    keyword_topn: 20
+    threads: 4
+    keyword_nr_candidates: 80
+    keyword_diversity: 0.6
+    keyword_stop_words: ["english", "paper", "proposed", "method", "results", "demonstrate", "abstract", "graphical", "email", "of "]
+    keyword_strict_literal: true
+    keyword_jaccard_threshold: 0.5
+    keyword_aliases:
+      neural networks: ["neural network", "neural networks", "neural net"]
+      leo satellite: ["leo satellite", "leo satellites"]
+      satellite networks: ["satellite network", "satellite networks"]
+      gnss receiver: ["gnss receiver", "gnss receivers"]
+      ntn: ["ntn", "non terrestrial networks"]
+    ARE_THERE_KEYWORDS: ["cybersecurity", "cyber warfare", "intrusion detection", "zero trust", "cyber resilience", "threat intelligence"]
+    remove_keywords: ["have been","peer reviewed","gt etx", "xlink gt","http www","neural network","http www" , "widely used" , "global navigation satellite", "existing methods", "support vector","case studies","widely used", "future research","long term","existing methods","simulation results","decision making","time series","cloud computing","point clouds","intrusion detection systems","title abstract","title abstract title","abstract title","machine learning ml","energy consumption","artificial intelligence ai","high accuracy","recent years","cyber attacks","extensive experiments","paper presents","paper proposes","real world","proposed method","results demonstrate", "graphical abstract", "email share", "state", "things iot", "deep", "content", "smart", "fauna", "forest", "et al."]
+    remove_patterns: ["math ","mml", "http","xmlns", "org ", "ieee ", "and ", "in ","of ", " is", "the ", " and", " are", " to", " this"]
+    show_progress: true
+
+  # ---- step_04 (build_graph) ----
+  graph_build:
+    keywords_csv: "cleaned_keywords_to_build_graphs.csv"  # Default keyword-counts path
+    papers_csv: "papers.csv"  # Default papers metadata path
+    keywords_counts_csv_candidates: ["cleaned_keywords_to_build_graphs.csv"]  # Fallback keyword-count files
+    papers_csv_candidates: ["combined.csv", "papers.csv"]  # Fallback papers files
+
+    # ---- build_graph: preprocessing / tensor construction ----
+    preprocess:
+      top_keywords: 500  # Limit the graph to the 500 most frequent keywords across the full dataset
+      number_months: null  # "null": Keep the full time range
+      start_year_month: null  # Build/plot on full available history
+      end_year_month: 2025-10  # No upper time bound
+      use_normalized_text: true  # Prefer the normalised abstract column
+      apply_norm_if_needed: true  # Create normalised abstracts when missing
+      normalize_keywords: true  # Normalise keyword tokens before matching
+      occurrence_mode: "token"  # Count token-level occurrences (other mode : "document" that only counts the presence)
+      citation_weighting: "per_doc"  # Add citation weight once per document
+      citation_source: "causal_cumulative"  # snapshot | causal_flow | causal_cumulative
+      citation_feature_variant: "frac_split"  # base | frac | frac_split (for causal citation sources)
+      k_roll: 6  # Rolling window for smoothing tensors
+      min_periods: 1  # Minimum observations inside the window
+      smooth_features: true  # Smooth per-keyword feature tensors
+      smooth_coocc: false  # Leave co-occurrence tensor unsmoothed
+      write_raw_tensors: true  # Persist both raw and smoothed tensors
+      scan_filter:
+        enabled: true  # Only scan the topics explicitly flagged in refined_topics.csv
+
+        column: "scan"
+        accepted_values: ["x"]
+        fallback_to_all: true
+
+    # ---- build_graph: tail correction ----
+    tail_correction:
+      roll_win_detect: 6  # Window size for tail breakpoint detection
+      fit_months_min: 24  # Minimum months considered during fitting
+      fit_months_max: 84  # Maximum months considered during fitting
+      drop_tol_pct: 0.05  # Allowed fractional drop before correction triggers
+      decline_run: 3  # Consecutive months required below the threshold
+      smooth_coeff_window: 3  # Rolling average applied to correction factors
+      clip_min: 0.5  # Lower bound for correction multipliers
+      clip_max: null  # Upper bound for correction multipliers (null = none)
+      epsilon: 1e-8  # Numerical stability constant for ratios
+      feature_coeff_source: "raw_pre_roll"  # Estimate correction on original pre-roll monthly features
+
+    # ---- build_graph: preview plots ----
+    preview:
+      emergence_mode: "raw"  # Transformation applied before previewing tensors
+      epsilon: 1e-8  # Stability constant used by ratio/pct transforms
+      feature_names: ["xcum_frac_split","oc_freq","edge_weight"]  # Expected feature labels
+      feature_weights: [0.3831, 0.5189, 0.0980]  # Balanced FW (refit 2005-2025): xcum_frac_split, oc_freq, edge_weight
+      normalize_feature_weights: true  # Auto-normalize feature weights to sum to 1
+      last_years: 0  # Keep the entire time range in previews
+      dpi: 180  # DPI for preview plots
+      plot_preview: false  # Emit preview plots for diagnostics
+
+    plot:
+      relative_evolution: true  # Export lagged relative-growth heatmaps during step_04 previews
+      relative_evolution_lag: 12  # Months used in (curr-prev)/prev with prev=t-12
+      relative_evolution_eps: 1e-8  # Stability floor for near-zero denominators
+      relative_evolution_cap_pct: 99.0  # Percentile cap for symmetric colour scaling
+      relative_evolution_subdir: "relative_evolution"  # Subfolder under inputs_dir for these heatmaps
+      relative_evolution_smooth: true  # Export trailing-window-smoothed lagged relative-growth heatmaps
+      relative_evolution_smooth_window: 12  # Trailing months averaged before computing lagged relative growth
+      relative_evolution_smooth_subdir: "relative_evolution_smooth"  # Separate folder for smoothed relative heatmaps
+      relative_evolution_cmap: "coolwarm"  # Colormap centered at zero for positive/negative growth
+      relative_evolution_tau: 0.0  # Absolute additive stabilizer used in (curr-prev)/(prev+tau)
+      relative_evolution_tau_quantile: 0.5  # Per-panel tau chosen from the 50th percentile of positive lagged values
+      relative_evolution_ignore_first_active_lag: true  # Mask the first valid lag after activation onset to reduce denominator noise
+      relative_evolution_ignore_reactivation_starts: true  # Mask reactivation starts to avoid artificial spikes in relative growth
+      relative_evolution_activity_threshold: 1e-8  # Values above this threshold are considered "active"
+      relative_evolution_mask_activation_months: 0  # No onset masking when additive tau is active
+
+    keyword_aliases:
+      neural networks: ["neural network", "neural networks", "neural net"]
+      leo satellite: ["leo satellite", "leo satellites"]
+      satellite networks: ["satellite network", "satellite networks"]
+      gnss receiver: ["gnss receiver", "gnss receivers"]
+      ntn: ["ntn", "non terrestrial networks"]
+    remove_keywords: ["peer reviewed"]  # Step-4-only removals so graph rebuilds can drop late keyword decisions without rerunning step_03_refined
+
+    drop_keywords: "drop_never_cited_or_occured"  # Keyword drop policy for graph tensors with option "drop_never_cited", "drop_never_occured", "drop_fully_inactve", "drop_never_cited_or_occured" 
+    show_progress: false  # Suppress tqdm progress bars in logs
+
+  # ---- step_05 (train_gnn) ----
+  graph_train:
+    reuse_existing_graph: true  # Reuse prebuilt tensors when training to avoid rebuilding
+    train_time_filter:
+      start_year_month: 2005-01  # Train-only time filter (applied when reuse_existing_graph=true)
+      end_year_month: null  # Keep data up to the latest month
+
+    # ---- train_gnn: training-time caps (when reuse_existing_graph=true) ----
+    preprocess:
+      top_keywords: 500  # Optional cap on active nodes (null = keep all)
+      cap_from_fw_aggregate: false  # Use FW-aggregate ranking when capping
+      citation_source: "causal_cumulative"  # snapshot | causal_flow | causal_cumulative (applies if tensors are rebuilt)
+      citation_feature_variant: "frac_split"  # base | frac | frac_split (applies if tensors are rebuilt)
+
+    # ---- train_gnn: model-output diagnostics (NOT step_04 input plots) ----
+    # These plots are generated from model predictions during/after training
+    # (loss curves, prediction heatmaps, top-K outputs, correlation/bubble diagnostics).
+    plot:
+      plot_dir: "plots"  # Directory for training plots
+      inputs_dir: "plots/inputs_seen"  # Directory for previewed inputs
+      plot_metric: "rmse"  # Metric visualised on training curves
+      plot_input_previews: false  # Skip training-time Xt previews; step_04 already provides the exploratory input plots
+      heatmap: "viridis"  # Matplotlib colour map for heatmaps
+      dpi: 180  # DPI used for training figures
+      xtick_step: 100  # Node tick spacing on training heatmaps
+      cap_pct: 95.0  # Percentile cap for training heatmaps
+      show_figs: true  # Display figures interactively when true
+      log_train_raw: false  # Log raw training curves before smoothing
+      topk_recent: true  # Generate top-K recent keyword plots
+      topk_k: 25  # Number of keywords in the top-K plot
+      topk_wordcloud: 40  # Number of keywords in each feature word cloud
+      topk_corr_k: 40  # Keywords included in the correlation diagnostics
+      topk_corr_from_date: 2022-01  # ISO date bounding the correlation window (inclusive)
+      topk_corr_window_months: 24  # Rolling window length when FROM_DATE is not enough
+      topk_corr_use_diff: ["log", "raw"]  # Difference modes used for the correlation plots
+      topk_corr_linfits: true  # Fit linear trends on correlation edges
+      topk_bubble_k: 20  # Keywords shown on the bubble network diagram
+      topk_bubble_window_months: 24  # Months used to compute recent/past comparisons
+      topk_bubble_diff_tol: 0.0  # Minimum difference needed before colouring edges
+      topk_bubble_max_edges: 200  # Edge cap for the bubble visualisation
+      topk_bubble_trend_mode: "percentage"  # How edge trends are computed (diff|slope|percentage)
+      relative_evolution: true  # Export additional heatmaps based on lagged relative growth
+      relative_evolution_lag: 12  # Months used in (curr-prev)/prev with prev=t-12
+      relative_evolution_eps: 1e-8  # Stability floor for near-zero denominators
+      relative_evolution_cap_pct: 99.0  # Percentile cap for symmetric colour scaling
+      relative_evolution_subdir: "relative_evolution"  # Subfolder under inputs_dir for these heatmaps
+      relative_evolution_smooth: true  # Export trailing-window-smoothed lagged relative-growth heatmaps
+      relative_evolution_smooth_window: 12  # Trailing months averaged before computing lagged relative growth
+      relative_evolution_smooth_subdir: "relative_evolution_smooth"  # Separate folder for smoothed relative heatmaps
+      relative_evolution_cmap: "coolwarm"  # Colormap centered at zero for positive/negative growth
+      relative_evolution_tau: 0.0  # Absolute additive stabilizer used in (curr-prev)/(prev+tau)
+      relative_evolution_tau_quantile: 0.5  # Per-panel tau chosen from the 50th percentile of positive lagged values
+      relative_evolution_ignore_first_active_lag: true  # Mask the first valid lag after activation onset to reduce denominator noise
+      relative_evolution_ignore_reactivation_starts: true  # Mask reactivation starts to avoid artificial spikes in relative growth
+      relative_evolution_activity_threshold: 1e-8  # Values above this threshold are considered "active"
+      relative_evolution_mask_activation_months: 0  # No onset masking when additive tau is active
+
+    # ---- train_gnn: model defaults ----
+    cfg_defaults:
+      EMERGENCE_MODE: "raw"  # Default emergence mode for modelling
+      EPSILON: 1e-8  # Default stability constant for transforms
+      LAST_YEARS: 0  # History retained before constructing windows
+      FORECAST: 24  # Forecast horizon in months (training/diagnostics)
+      TEMP_WINDOW: 12  # Temporal window length supplied to the model
+      FEATURE_NAMES_DEFAULT: ["xcum_frac_split", "oc_freq", "edge_weight"]  # Fallback feature names
+      FW: [0.3831, 0.5189, 0.0980]  # Balanced FW (refit 2005-2025): xcum_frac_split, oc_freq, edge_weight
+      NORMALIZE_FW: true  # Auto-normalize FW to sum to 1 during training/inference
+      HIDDEN_CHANNELS: 32  # Hidden dimension of transformer layers
+      NUM_HEADS: 2  # Attention heads per transformer layer
+      DROPOUT: 0.30  # Dropout probability applied across the model
+      USE_POSENC: true  # Use sinusoidal positional encodings
+      USE_CAUSAL_MASK: true  # Apply causal masking in temporal attention
+      NODE_ONLY: false  # Disable message passing when true
+      GRAPH_GATE: true  # Blend graph and node features via a learned gate
+      COPY_HEAD: false  # Add residual copy head using last frame
+      EDGE_SELF_LOOPS: false  # Inject self-loops before message passing
+      EDGE_NORM: "none"  # Edge-weight normalisation strategy
+      EPOCHS: 9  # Maximum training epochs
+      LR: 0.001  # Optimiser learning rate
+      WD: 0.0001  # Weight decay applied during optimisation
+      DRIFT_LAG: 24  # Months used to estimate drift slope
+      DRIFT_DAMP: 1.0  # Drift extrapolation multiplier (1.0 = full drift, 0.0 = persistence)
+      PATIENCE: 3  # Early-stopping patience in epochs
+      MIN_DELTA: 0.001  # Minimum improvement to reset early stopping
+      TARGET_MODE: "residual"  # Target formulation used for training
+      LOSS_SPACE: "raw"  # Domain in which loss is computed
+      PER_NODE_STD: false  # Standardise targets per node before training
+      SPLIT_FRACS: [0.6, 0.2, 0.2]  # Fractions for train/validation/test splits
+      SPLIT_DATES:
+        enabled: true  # Fixed split used for sweeps and comparable diagnostics
+        train_start: 2005-12-01
+        train_end: 2016-08-01
+        val_start: 2016-09-01
+        val_end: 2020-03-01
+        test_start: 2020-04-01
+        test_end: 2023-10-01
+      LOSS_FN: "rmse"  # Primary loss function
+      HUBER_DELTA: 1.0  # Delta parameter when LOSS_FN == huber
+
+    # ---- train_gnn: optuna sweep configuration ----
+    sweep:
+      enabled: true
+      model_family: "graph_mix"  # graph_base | graph_mix | graph_multi | graph_multi_mix | drift
+      metric: "rmse"
+      n_trials: 20
+      max_total_trials: null  # Optional cap across restarts (e.g., 40 means total trials in DB never exceed 40)
+      top_keywords: 100  # Optional cap during sweep (overrides graph_train.preprocess.top_keywords)
+      variance_penalty: 0.05  # objective = mean(val_metric) + penalty * std(val_metric)
+      drift_grid: true  # for model_family=drift: direct grid over DRIFT_LAG/DRIFT_DAMP
+      rolling_validation:
+        enabled: true
+        n_folds: 3  # rolling-origin folds inside SPLIT_DATES val window
+      pruner:
+        type: "median"  # median | hyperband | none
+        n_startup_trials: 8
+        n_warmup_steps: 0
+      study:
+        name: "usecase_cyberspace_{family}"
+        storage: "sqlite:///data/usecase_cyberspace/05_train_gnn/outputs/optuna_{family}.db"
+        load_if_exists: true
+      search_space:
+        common:
+          TEMP_WINDOW: [12, 24]
+          FORECAST: [24]
+          HIDDEN_CHANNELS: [32, 64, 96]
+          NUM_HEADS: [2, 4, 8]
+          DROPOUT: [0.1, 0.5]
+          LR: [1.0e-4, 3.0e-3]
+          WD: [1.0e-6, 1.0e-3]
+        graph_base:
+          EDGE_NORM: ["none", "deg", "row", "minmax"]
+          EDGE_SELF_LOOPS: [false, true]
+          GRAPH_GATE: [true, false]
+        graph_mix:
+          GRAPH_MIX_LAMBDA: [0.0, 0.5]
+        graph_multi:
+          GRAPH_MULTI_LAGS: [[0, 6], [0, 6, 12], [0, 12, 24]]
+          GRAPH_MULTI_AUX_FORECASTS: [[], [6], [6, 12]]
+          GRAPH_MULTI_AUX_WEIGHT: [0.0, 0.2]
+        graph_multi_mix:
+          GRAPH_MIX_LAMBDA: [0.0, 0.5]
+          GRAPH_MULTI_LAGS: [[0, 6], [0, 6, 12], [0, 12, 24]]
+          GRAPH_MULTI_AUX_FORECASTS: [[], [6], [6, 12]]
+          GRAPH_MULTI_AUX_WEIGHT: [0.0, 0.2]
+        drift:
+          DRIFT_LAG: [6, 12, 18, 24, 36, 48]
+          DRIFT_DAMP: [0.4, 0.6, 0.8, 1.0]
+
+    diagnostics:
+      enabled: false  # Keep false while running sweeps
+      top_keywords: null  # Optional override for diagnostics to speed runs (null = keep graph.preprocess)
+      mode: "basic"  # basic=graph+graph_mix+graph_multi+nograph+baselines; full/complex=all ablations
+      graph_mix_lambda: 0.1  # try 0.05–0.5
+      graph_multi_lags: [0, 6, 12]  # lagged graphs at t, t-6, t-12
+      graph_multi_aux_forecasts: [6, 12]  # auxiliary horizons (months) for multi-horizon training
+      graph_multi_aux_weight: 0.1  # weight of auxiliary loss (0 disables)
+      graph_multi_tests: true  # run extra graph_multi variants (aux0, lag 0/12/24, small model)
+      merge_per_node_all: true  # auto-merge diagnostics_per_node_all.csv after each diagnostics run
+      graph_value_tests: true  # edge shuffle + time shift tests
+      graph_value_lag: 6  # months to shift for time-shift test
+      node_gain_tests: true  # per-node gain + bucket summaries
+      lag_corr_tests: true  # lag correlation diagnostics (self vs neighbor)
+      lag_corr_lags: [0, 6, 12, 24]
+      # ---- block experiments (stacked diagnostics) ----
+      block_experiments:
+        enabled: true  # Set false to run a single diagnostics pass (uses cfg_defaults/overrides)
+        blocks:
+          - name: base_h32_h2_w12
+            hidden_channels: 32
+            num_heads: 2
+            temp_window: 12
+          - name: heads4_h32_w12
+            hidden_channels: 32
+            num_heads: 4
+            temp_window: 12
+          - name: width64_h2_w12
+            hidden_channels: 64
+            num_heads: 2
+            temp_window: 12
+          - name: window24_h32_h2
+            hidden_channels: 32
+            num_heads: 2
+            temp_window: 24
+      # ---- fast_diagnostic profile (copy values above to switch quickly) ----
+      fast_diagnostic:
+        enabled: true
+        mode: "basic"
+        graph_mix_lambda: 0.05
+        graph_multi_lags: [0, 6]
+        graph_multi_aux_forecasts: [6]
+        graph_multi_aux_weight: 0.05
+        graph_multi_tests: false
+        merge_per_node_all: true
+        graph_value_tests: false
+        node_gain_tests: true
+        lag_corr_tests: false
+        preprocess:
+          top_keywords: 100
+          cap_from_fw_aggregate: true  # cap using FW-aggregate ranking from full graph (reuse_existing_graph must be true)
+          number_months: 250
+          start_year_month: null
+          end_year_month: 2025-10
+
+  # ---- step_06 (predict) ----
+  predict:
+    plot:
+      xtick_step: 100  # Node tick spacing on heatmaps
+      cap_pct: 95.0  # Percentile cap applied to heatmap colour scales
+      topk_heatmap: 20  # Size of the optional Top-K heatmap (0 disables it)
+      topk_heatmap_date: 2025-10  # ISO date (YYYY-MM or YYYY-MM-DD) when freezing the Top-K view
+      topk_heatmap_date_file: null  # Path to text file containing the freeze date (overrides topk_heatmap_date when set)
+      topk_heatmap_from_date: 2020-01  # ISO date to start the Top-K heatmap timeline (optional)
+      topk_heatmap_feature: ["oc_freq", "edge_weight", "xcum_frac_split"]  # Features used for the Top-K heatmap
+    topk_predict: 20  # Number of top predictions exported after training
+    reuse_graph_outputs: true  # Skip rerunning step_04 and reuse its artifacts
+
+    cfg_defaults:
+      EMERGENCE_MODE: "raw"  # Default emergence mode for modelling
+      EPSILON: 1e-8  # Default stability constant for transforms
+      LAST_YEARS: 0  # History retained before constructing windows
+      FORECAST: 60  # Forecast horizon in months
+      TEMP_WINDOW: 12  # Temporal window length supplied to the model
+      FEATURE_NAMES_DEFAULT: ["xcum_frac_split", "oc_freq", "edge_weight"]  # Fallback feature names
+      FW: [1, 1, 1]  # Feature weights used for aggregate targets
+      NORMALIZE_FW: true  # Auto-normalize FW to sum to 1 during prediction/inference
+      HIDDEN_CHANNELS: 32  # Hidden dimension of transformer layers
+      NUM_HEADS: 2  # Attention heads per transformer layer
+      DROPOUT: 0.30  # Dropout probability applied across the model
+      USE_POSENC: true  # Use sinusoidal positional encodings
+      USE_CAUSAL_MASK: true  # Apply causal masking in temporal attention
+      NODE_ONLY: false  # Disable message passing when true
+      GRAPH_GATE: true  # Blend graph and node features via a learned gate
+      COPY_HEAD: false  # Add residual copy head using last frame
+      EDGE_SELF_LOOPS: false  # Inject self-loops before message passing
+      EDGE_NORM: "none"  # Edge-weight normalisation strategy
+      EPOCHS: 9  # Maximum training epochs
+      LR: 0.001  # Optimiser learning rate
+      WD: 0.0001  # Weight decay applied during optimisation
+      PATIENCE: 3  # Early-stopping patience in epochs
+      MIN_DELTA: 0.001  # Minimum improvement to reset early stopping
+      TARGET_MODE: "residual"  # Target formulation used for training
+      LOSS_SPACE: "raw"  # Domain in which loss is computed
+      PER_NODE_STD: false  # Standardise targets per node before training
+      SPLIT_FRACS: [0.6, 0.2, 0.2]  # Fractions for train/validation/test splits
+      LOSS_FN: "rmse"  # Primary loss function
+      HUBER_DELTA: 1.0  # Delta parameter when LOSS_FN == huber
+      PLOT_DIR: "plots"  # Directory for training plots
+      INPUTS_DIR: "plots/inputs_seen"  # Directory for previewed inputs
+      PLOT_METRIC: "rmse"  # Metric visualised on training curves
+      PLOT_INPUT_PREVIEWS: false  # Skip training-time Xt previews; step_04 already provides the exploratory input plots
+      HEATMAP: "viridis"  # Matplotlib colour map for heatmaps
+      DPI: 180  # DPI used for training figures
+      XTICK_STEP: 100  # Node tick spacing on training heatmaps
+      CAP_PCT: 95.0  # Percentile cap for training heatmaps
+      SHOW_FIGS: true  # Display figures interactively when true
+      LOG_TRAIN_RAW: false  # Log raw training curves before smoothing
+      TOPK_RECENT: true  # Generate top-K recent keyword plots
+      TOPK_K: 25  # Number of keywords in the top-K plot
+      TOPK_WORDCLOUD: 40  # Number of keywords in each feature word cloud
+      TOPK_CORR_K: 40  # Keywords included in the correlation diagnostics
+      TOPK_CORR_FROM_DATE: 2022-01  # ISO date bounding the correlation window (inclusive)
+      TOPK_CORR_WINDOW_MONTHS: 24  # Rolling window length when FROM_DATE is not enough
+      TOPK_CORR_USE_DIFF: ["log", "raw"]  # Difference modes used for the correlation plots
+      TOPK_CORR_LINFITS: true  # Fit linear trends on correlation edges
+      TOPK_BUBBLE_K: 20  # Keywords shown on the bubble network diagram
+      TOPK_BUBBLE_WINDOW_MONTHS: 24  # Months used to compute recent/past comparisons
+      TOPK_BUBBLE_DIFF_TOL: 0.0  # Minimum difference needed before colouring edges
+      TOPK_BUBBLE_MAX_EDGES: 200  # Edge cap for the bubble visualisation
+      TOPK_BUBBLE_TREND_MODE: "percentage"  # How edge trends are computed (diff|slope|percentage)
