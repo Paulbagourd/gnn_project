@@ -5,6 +5,7 @@ __pycache__/
 .eggs/
 .vscode/
 .idea/
+docs/
 
 # Data / outputs
 outputs/
