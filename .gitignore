@@ -28,6 +28,35 @@ docs/**/*.pptx
 # Packaged/derived archives
 *.zip
 
+# Local manuscript/export artifacts not needed for code release
+cover_letter_scientometrics.*
+gnn_beamer.*
+gnn_sti.pdf
+gnn_for_tm_beamer.pdf
+impact4cast.*
+latexmkrc
+step_04_graph.py.bak
+step_04_graph_copy.py
+_fw_rank_path.txt
+Research pre-proposal_CYD Doctoral and Postdoctoral Fellowships_Stage 1.docx
+submission_scientometrics_source_only/figures/
+docs/beamer_assets/
+docs/build/
+docs/cyberplots/
+docs/cyberstandalone/
+docs/edt_quantum/
+docs/research_gap/
+docs/tools/
+docs/gnn_beamer.*
+docs/gnn_bookchapter.tex
+docs/gnn_sti.tex
+docs/message_prof_protocole_gnn_llm.txt
+docs/protocol_gnn_llm_comparison.tex
+docs/protocol_outcome.tex
+docs/protocol_outcome_primary.tex
+docs/draft_formulas.*
+automated_project/
+
 # LaTeX build artifacts
 *.aux
 *.log
